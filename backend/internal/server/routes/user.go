@@ -76,6 +76,16 @@ func RegisterUserRoutes(
 			channels.GET("/available", h.AvailableChannel.List)
 		}
 
+		// 图片试炼场：认证用户调用，实际请求由后端代理到网关，保留用量/计费记录。
+		playground := authenticated.Group("/model-playground")
+		{
+			playground.POST("/images", h.ModelPlayground.Images)
+			playground.POST("/images/tasks", h.ModelPlayground.CreateImageTask)
+			playground.GET("/images/tasks", h.ModelPlayground.ListImageTasks)
+			playground.GET("/images/tasks/:id", h.ModelPlayground.GetImageTask)
+			playground.DELETE("/images/tasks/:id", h.ModelPlayground.DeleteImageTask)
+		}
+
 		// 使用记录
 		usage := authenticated.Group("/usage")
 		{
