@@ -788,6 +788,8 @@ func (s *AccountTestService) fetchUpstreamModelList(ctx context.Context, account
 
 func (s *AccountTestService) buildUpstreamModelsRequest(ctx context.Context, account *Account) (*http.Request, error) {
 	switch {
+	case account.Platform == PlatformCommandCode:
+		return s.buildCommandCodeUpstreamModelsRequest(ctx, account)
 	case account.Platform == PlatformAntigravity:
 		return s.buildAntigravityAPIKeyModelsRequest(ctx, account)
 	case account.IsGrok():
@@ -805,6 +807,32 @@ func (s *AccountTestService) buildUpstreamModelsRequest(ctx context.Context, acc
 			fmt.Sprintf("Unsupported platform for upstream model sync: %s", account.Platform), nil,
 		)
 	}
+}
+
+// CommandCode GO can list the provider catalog even though inference uses
+// /alpha/generate. Keep this fixed origin aligned with the native gateway;
+// never send the account key to an arbitrary model-list URL.
+func (s *AccountTestService) buildCommandCodeUpstreamModelsRequest(ctx context.Context, account *Account) (*http.Request, error) {
+	if account == nil {
+		return nil, newUpstreamModelSyncConfigError("Account is required", nil)
+	}
+	if account.Type != AccountTypeAPIKey {
+		return nil, newUpstreamModelSyncUnsupportedError("CommandCode model sync requires an API key account", nil)
+	}
+	apiKey := strings.TrimSpace(account.GetCredential("api_key"))
+	if apiKey == "" {
+		return nil, newUpstreamModelSyncConfigError("No CommandCode API key is available", nil)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.commandcode.ai/provider/v1/models", nil)
+	if err != nil {
+		return nil, newUpstreamModelSyncConfigError("Failed to build CommandCode model request", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "command-code-cli/1.54.1")
+	req.Header.Set("x-command-code-version", "1.54.1")
+	req.Header.Set("x-cli-environment", "production")
+	return req, nil
 }
 
 func (s *AccountTestService) buildGrokUpstreamModelsRequest(ctx context.Context, account *Account) (*http.Request, error) {

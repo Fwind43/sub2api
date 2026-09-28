@@ -237,4 +237,39 @@ describe('ModelWhitelistSelector', () => {
     expect(syncButton).toBeDefined()
     expect(syncButton?.exists()).toBe(true)
   })
+  it('syncs CommandCode account models through the existing account endpoint', async () => {
+    syncUpstreamModels.mockResolvedValue({ models: ['fixture-model'] })
+    const wrapper = mountSelector({ platform: 'commandcode', accountId: 46 })
+    const button = wrapper.findAll('button').find(b => b.text() === 'admin.accounts.syncUpstreamModels')
+    expect(button).toBeDefined()
+    await button!.trigger('click')
+    await flushPromises()
+    expect(syncUpstreamModels).toHaveBeenCalledWith(46)
+    expect(wrapper.emitted('update:modelValue')).toEqual([[['fixture-model']]])
+    expect(showSuccess).toHaveBeenCalled()
+  })
+
+  it('shows CommandCode sync for new account credentials', async () => {
+    const credentials = { platform: 'commandcode', type: 'apikey', api_key: 'test-key' }
+    syncUpstreamModelsPreview.mockResolvedValue({ models: ['fixture-model'] })
+    const wrapper = mountSelector({ platform: 'commandcode', syncCredentials: credentials })
+    const button = wrapper.findAll('button').find(b => b.text() === 'admin.accounts.syncUpstreamModels')
+    expect(button).toBeDefined()
+    await button!.trigger('click')
+    await flushPromises()
+    expect(syncUpstreamModelsPreview).toHaveBeenCalledWith(credentials)
+    expect(wrapper.emitted('upstream-synced')).toEqual([[]])
+  })
+
+  it('preserves CommandCode selection when upstream sync fails', async () => {
+    syncUpstreamModels.mockRejectedValue(new Error('fixture upstream failure'))
+    const wrapper = mountSelector({ platform: 'commandcode', accountId: 46, modelValue: ['keep-model'] })
+    const button = wrapper.findAll('button').find(b => b.text() === 'admin.accounts.syncUpstreamModels')
+    await button!.trigger('click')
+    await flushPromises()
+    expect(showError).toHaveBeenCalled()
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+    expect(button!.attributes('disabled')).toBeUndefined()
+  })
+
 })
