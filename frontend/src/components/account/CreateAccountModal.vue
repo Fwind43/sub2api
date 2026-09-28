@@ -231,6 +231,17 @@
         </div>
       </div>
 
+      <div class="rounded-lg border border-gray-200 p-3 dark:border-dark-600">
+        <button type="button" class="btn btn-secondary" @click="selectCommandCodePreset">
+          CommandCode (compatible gateway)
+        </button>
+        <p v-if="commandCodePreset" class="input-hint mt-2" role="status">
+          CommandCode adapter mode: enter your compatible gateway base URL and its API key,
+          not a CommandCode website URL or browser cookie. Uses OpenAI API-key passthrough.
+          Upstream account selection remains in the adapter; this entry represents one gateway.
+        </p>
+      </div>
+
       <!-- Account Type Selection (Anthropic) -->
       <div v-if="form.platform === 'anthropic'">
         <label class="input-label">{{ t('admin.accounts.accountType') }}</label>
@@ -3886,7 +3897,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, watch } from 'vue'
+import { ref, reactive, computed, watch, nextTick } from 'vue'
+import { normalizeCommandCodeBaseUrl } from '@/utils/commandcode'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 
@@ -4424,6 +4436,22 @@ const applyGrokOAuthUpstreamConfig = (credentials: Record<string, unknown>) => {
 }
 const interceptWarmupRequests = ref(false)
 const autoPauseOnExpired = ref(true)
+const commandCodePreset = ref(false)
+const selectCommandCodePreset = async () => {
+  form.platform = 'openai'
+  accountCategory.value = 'apikey'
+  await nextTick() // Let platform/category watchers finish before applying gateway defaults.
+  commandCodePreset.value = true
+  form.type = 'apikey'
+  apiKeyBaseUrl.value = ''
+  apiKeyValue.value = ''
+  openaiPassthroughEnabled.value = true
+  openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
+  poolModeEnabled.value = false
+  allowedModels.value = []
+  modelMappings.value = []
+  openAICompactModelMappings.value = []
+}
 const openaiPassthroughEnabled = ref(false)
 // OpenAI Codex namespace 工具摊平兼容开关（仅 OAuth），缺省关闭即原样保留
 const openaiFlattenNamespacesEnabled = ref(false)
@@ -4926,6 +4954,10 @@ watch(
   }
 )
 
+watch([() => form.platform, accountCategory], ([platform, category]) => {
+  if (platform !== 'openai' || category !== 'apikey') commandCodePreset.value = false
+})
+
 // Gemini AI Studio OAuth availability (requires operator-configured OAuth client)
 watch(
   [accountCategory, () => form.platform],
@@ -5293,6 +5325,7 @@ const submitCreateAccount = async (payload: CreateAccountRequest) => {
 
 // Methods
 const resetForm = () => {
+  commandCodePreset.value = false
   step.value = 1
   form.name = ''
   form.notes = ''
@@ -5488,6 +5521,12 @@ const buildOpenAIExtra = (base?: Record<string, unknown>): Record<string, unknow
     delete extra.images_url_to_b64_json
   }
 
+  if (commandCodePreset.value && accountCategory.value === 'apikey') {
+    extra.provider = 'commandcode_gateway'
+    extra.openai_passthrough = true
+    extra.openai_apikey_responses_websockets_v2_mode = OPENAI_WS_MODE_OFF
+    extra.openai_apikey_responses_websockets_v2_enabled = false
+  }
   return Object.keys(extra).length > 0 ? extra : undefined
 }
 
@@ -5762,6 +5801,18 @@ const handleSubmit = async () => {
   if (!apiKeyValue.value.trim()) {
     appStore.showError(t('admin.accounts.pleaseEnterApiKey'))
     return
+  }
+
+  // Never fall back to the public OpenAI endpoint for a CommandCode gateway.
+  if (commandCodePreset.value) {
+    try {
+      apiKeyBaseUrl.value = normalizeCommandCodeBaseUrl(apiKeyBaseUrl.value)
+      openaiPassthroughEnabled.value = true
+      poolModeEnabled.value = false
+    } catch (error) {
+      appStore.showError(error instanceof Error ? error.message : 'Invalid CommandCode adapter URL')
+      return
+    }
   }
 
   // Determine default base URL based on platform

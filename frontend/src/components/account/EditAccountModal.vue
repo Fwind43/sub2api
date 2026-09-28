@@ -3104,6 +3104,7 @@
 </template>
 
 <script setup lang="ts">
+import { normalizeCommandCodeBaseUrl } from '@/utils/commandcode'
 import { ref, reactive, computed, watch, nextTick, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -5140,6 +5141,11 @@ const handleSubmit = async () => {
 		}
 	}
 
+  if (props.account.extra?.provider === 'commandcode_gateway') {
+    openaiPassthroughEnabled.value = true
+    poolModeEnabled.value = false
+  }
+
   const updatePayload: Record<string, unknown> = { ...form }
   try {
     // 后端期望 proxy_id: 0 表示清除代理，而不是 null
@@ -5166,7 +5172,9 @@ const handleSubmit = async () => {
     // For apikey type, handle credentials update
     if (props.account.type === 'apikey') {
       const currentCredentials = (props.account.credentials as Record<string, unknown>) || {}
-      const newBaseUrl = editBaseUrl.value.trim() || defaultBaseUrl.value
+      const newBaseUrl = props.account.extra?.provider === 'commandcode_gateway'
+        ? normalizeCommandCodeBaseUrl(editBaseUrl.value)
+        : editBaseUrl.value.trim() || defaultBaseUrl.value
       const shouldApplyModelMapping = !(props.account.platform === 'openai' && openaiPassthroughEnabled.value)
 
       // Always update credentials for apikey type to handle model mapping changes
@@ -5777,6 +5785,11 @@ const handleSubmit = async () => {
         }
       }
 
+      if (currentExtra.provider === 'commandcode_gateway' && props.account.type === 'apikey') {
+        newExtra.openai_passthrough = true
+        newExtra.openai_apikey_responses_websockets_v2_mode = OPENAI_WS_MODE_OFF
+        newExtra.openai_apikey_responses_websockets_v2_enabled = false
+      }
       updatePayload.extra = newExtra
     }
 

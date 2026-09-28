@@ -77,6 +77,7 @@ import Icon from '@/components/icons/Icon.vue'
 const { t } = useI18n()
 
 interface Props {
+  provider?: string
   platform: AccountPlatform
   type: AccountType
   authMode?: string
@@ -87,7 +88,10 @@ interface Props {
 
 const props = defineProps<Props>()
 
-const platformLabel = computed(() => sharedPlatformLabel(props.platform))
+const platformLabel = computed(() => {
+  if (props.platform === 'openai' && props.type === 'apikey' && props.provider === 'commandcode_gateway') return 'CommandCode'
+  return sharedPlatformLabel(props.platform)
+})
 
 const normalizedAuthMode = computed(() =>
   (props.authMode || '').trim().toLowerCase().replace(/[\s_-]+/g, '')
