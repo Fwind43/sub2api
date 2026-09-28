@@ -272,4 +272,22 @@ describe('ModelWhitelistSelector', () => {
     expect(button!.attributes('disabled')).toBeUndefined()
   })
 
+  it('emits CommandCode aliases with original upstream route mappings', async () => {
+    syncUpstreamModels.mockResolvedValue({ models: ['provider/model'], warnings: [] })
+    const wrapper = mountSelector({ platform: 'commandcode', accountId: 42 })
+    await wrapper.findAll('button').find(b => b.text() === 'admin.accounts.syncUpstreamModels')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.emitted('update:modelValue')?.[0]).toEqual([['model']])
+    expect(wrapper.emitted('update:modelMappings')?.[0]).toEqual([[{ from: 'model', to: 'provider/model' }]])
+  })
+
+  it('keeps prefixes for other platforms', async () => {
+    syncUpstreamModels.mockResolvedValue({ models: ['provider/model'], warnings: [] })
+    const wrapper = mountSelector({ platform: 'openai', accountId: 42 })
+    await wrapper.findAll('button').find(b => b.text() === 'admin.accounts.syncUpstreamModels')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.emitted('update:modelValue')?.[0]).toEqual([['provider/model']])
+    expect(wrapper.emitted('update:modelMappings')).toBeUndefined()
+  })
+
 })

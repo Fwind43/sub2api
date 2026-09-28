@@ -154,11 +154,13 @@ import { useClipboard } from '@/composables/useClipboard'
 import ModelIcon from '@/components/common/ModelIcon.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { allModels, getModelsByPlatform } from '@/composables/useModelWhitelist'
+import { mergeUpstreamModelAliases, type UpstreamModelMapping } from '@/utils/upstreamModelAliases'
 
 const { t } = useI18n()
 
 const props = defineProps<{
   modelValue: string[]
+  modelMappings?: UpstreamModelMapping[]
   platform?: string
   platforms?: string[]
   accountId?: number
@@ -173,6 +175,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   'update:modelValue': [value: string[]]
   'upstream-synced': []
+  'update:modelMappings': [value: UpstreamModelMapping[]]
 }>()
 
 const appStore = useAppStore()
@@ -320,16 +323,13 @@ const syncUpstreamModels = async () => {
       emit('upstream-synced')
     }
 
-    const newModels = [...props.modelValue]
-    let addedCount = 0
-    for (const model of upstreamModels) {
-      if (!newModels.includes(model)) {
-        newModels.push(model)
-        addedCount += 1
-      }
-    }
-
-    emit('update:modelValue', newModels)
+    const useAliases = (props.platform ?? props.syncCredentials?.platform) === 'commandcode'
+    const synced = useAliases
+      ? mergeUpstreamModelAliases(upstreamModels, props.modelValue, props.modelMappings ?? [])
+      : { models: [...new Set([...props.modelValue, ...upstreamModels])], mappings: [] }
+    const addedCount = synced.models.filter(model => !props.modelValue.includes(model)).length
+    if (useAliases) emit('update:modelMappings', synced.mappings)
+    emit('update:modelValue', synced.models)
     const warnings = result.warnings ?? []
     const hasPartialMetadata = warnings.some(
       warning => warning.code === 'upstream_model_metadata_partial'
