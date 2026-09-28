@@ -95,6 +95,9 @@ func (s *AccountUsageService) getCommandCodeUsage(ctx context.Context, account *
 		usage.Error = entry.err.Error()
 		return usage, nil
 	}
+	if entry.credits != nil && entry.credits.Credits != nil {
+		usage.CommandCodeMonthlyCredits = entry.credits.Credits.MonthlyCredits
+	}
 	if entry.credits != nil && entry.credits.WindowLimits != nil {
 		usage.FiveHour = commandCodeUsageWindow(entry.credits.WindowLimits.FiveHour, time.Now())
 		usage.SevenDay = commandCodeUsageWindow(entry.credits.WindowLimits.Weekly, time.Now())

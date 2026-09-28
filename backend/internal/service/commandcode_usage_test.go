@@ -1,8 +1,11 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/commandcode"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 )
@@ -67,3 +70,52 @@ func TestCommandCodeUsagePlan(t *testing.T) {
 		})
 	}
 }
+
+func TestCommandCodeMonthlyCredits(t *testing.T) {
+	for _, tc := range []struct {
+		name, body string
+		want       *float64
+	}{
+		{"ten", `{"credits":{"monthlyCredits":10}}`, ccMonthlyNumber(10)},
+		{"partial", `{"credits":{"monthlyCredits":4.25}}`, ccMonthlyNumber(4.25)},
+		{"zero", `{"credits":{"monthlyCredits":0}}`, ccMonthlyNumber(0)},
+		{"missing", `{}`, nil},
+		{"null", `{"credits":{"monthlyCredits":null}}`, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/alpha/billing/credits" {
+					t.Errorf("unexpected path: %s", r.URL.Path)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer server.Close()
+			service := &AccountUsageService{}
+			account := &Account{Credentials: map[string]any{"api_key": "fixture", "base_url": server.URL}}
+			got, err := service.getCommandCodeUsage(context.Background(), account, true)
+			if err != nil || got == nil || got.Error != "" {
+				t.Fatalf("usage: %+v err: %v", got, err)
+			}
+			body, err := json.Marshal(got)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var wire map[string]any
+			if err = json.Unmarshal(body, &wire); err != nil {
+				t.Fatal(err)
+			}
+			value, present := wire["commandcode_monthly_credits"]
+			if tc.want == nil {
+				if present {
+					t.Fatalf("missing balance must stay absent: %s", body)
+				}
+				return
+			}
+			if !present || value != *tc.want {
+				t.Fatalf("got %v present=%v want %v", value, present, *tc.want)
+			}
+		})
+	}
+}
+func ccMonthlyNumber(v float64) *float64 { return &v }

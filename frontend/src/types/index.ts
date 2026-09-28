@@ -1422,6 +1422,7 @@ export interface GrokBillingSummary {
 }
 
 export interface AccountUsageInfo {
+  commandcode_monthly_credits?: number | null
   source?: 'passive' | 'active'
   updated_at: string | null
   five_hour: UsageProgress | null
