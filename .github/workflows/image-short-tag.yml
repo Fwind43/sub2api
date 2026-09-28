@@ -1,0 +1,32 @@
+name: Publish short image tag
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/image-short-tag.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  packages: write
+concurrency:
+  group: publish-short-image-tag
+  cancel-in-progress: false
+jobs:
+  retag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Tag verified image without rebuilding
+        env:
+          IMAGE: ghcr.io/fwind43/sub2api
+          DIGEST: sha256:c2ad1e67517f07047f16ca078c2e5229859c4a8b26e6ffb98d806f75c3b7bbc2
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create --tag "$IMAGE:0.2.9-fwind" "$IMAGE@$DIGEST"
+          docker buildx imagetools inspect "$IMAGE:0.2.9-fwind" --raw > manifest.json
+          test "sha256:$(sha256sum manifest.json | cut -d ' ' -f1)" = "$DIGEST"
+          echo "Verified $IMAGE:0.2.9-fwind at $DIGEST" >> "$GITHUB_STEP_SUMMARY"
