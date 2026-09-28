@@ -5897,6 +5897,7 @@ const handleSubmit = async () => {
     credentials.user_id = authorization.userId
     credentials.user_name = authorization.userName
     credentials.key_name = authorization.keyName
+    if (authorization.planId) credentials.plan_type = authorization.planId
   }
   if (form.platform === 'gemini') {
     credentials.tier_id = geminiTierAIStudio.value

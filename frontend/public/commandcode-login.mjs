@@ -1,8 +1,40 @@
 #!/usr/bin/env node
 // Run on the computer containing your browser, never on the remote server.
 import http from 'node:http';
+import { readFile } from 'node:fs/promises';
 import { timingSafeEqual } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
+// Optional local-only session archive. No cookies enter the callback result.
+export async function enrichSubscription(result, sessionFile, request = fetch) {
+  if (!sessionFile || !result.userId) return result;
+  try {
+    const archive = JSON.parse(await readFile(sessionFile, 'utf8'));
+    const now = Date.now() / 1000;
+    const url = new URL('https://api.commandcode.ai/internal/billing/subscriptions');
+    const cookies = (Array.isArray(archive.cookies) ? archive.cookies : []).filter(c => {
+      const domain = typeof c.domain === 'string' ? c.domain : '';
+      const hostMatch = domain.startsWith('.')
+        ? (url.hostname === domain.slice(1) || url.hostname.endsWith(domain))
+        : url.hostname === domain;
+      const path = c.path || '/';
+      return hostMatch && (url.pathname === path || url.pathname.startsWith(path.endsWith('/') ? path : path + '/'))
+        && (!(c.expires > 0) || c.expires > now)
+        && typeof c.name === 'string' && /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(c.name)
+        && typeof c.value === 'string' && !/[\x00-\x20\x7f;,]/.test(c.value);
+    });
+    if (!cookies.length) return result;
+    const response = await request(url.toString(), {
+      method: 'GET', redirect: 'error', signal: AbortSignal.timeout(10000),
+      headers: {Cookie: cookies.map(c => c.name + '=' + c.value).join('; '), Accept: 'application/json'}
+    });
+    if (!response.ok) return result;
+    const body = await response.json();
+    const data = body?.data;
+    if (body.success !== true || data?.userId !== result.userId || data.status !== 'active'
+      || typeof data.planId !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(data.planId)) return result;
+    return {...result, planId: data.planId, subscriptionStatus: 'active', subscriptionUserId: data.userId};
+  } catch { return result; } // Login remains usable if the optional session expired.
+}
 export function startReceiver(state, onResult, ttl = 600000) {
   if (!/^[a-f0-9]{64}$/.test(state)) throw new Error('Invalid state');
   let used = false;
@@ -39,7 +71,7 @@ export function startReceiver(state, onResult, ttl = 600000) {
       if (typeof body.apiKey !== 'string' || !body.apiKey || body.apiKey.length > 16384 || /[\x00-\x20\x7f]/.test(body.apiKey)) return send(400, 'Invalid credential');
       for (const key of ['userId','userName','keyName']) if (body[key] !== undefined && (typeof body[key] !== 'string' || body[key].length > 4096)) return send(400, 'Invalid metadata');
       used = true;
-      onResult({state, apiKey:body.apiKey,userId:body.userId || '',userName:body.userName || '',keyName:body.keyName || ''});
+      await onResult({state, apiKey:body.apiKey,userId:body.userId || '',userName:body.userName || '',keyName:body.keyName || ''});
       send(200, 'Authorization received. Copy the JSON result from your terminal into sub2api. Do not share it.');
       clearTimeout(timer);
       server.close();
@@ -55,11 +87,16 @@ export function startReceiver(state, onResult, ttl = 600000) {
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const state = process.argv[2];
+  const sessionFile = process.argv[3] === '--session-file' ? process.argv[4] : undefined;
   if (!/^[a-f0-9]{64}$/.test(state || '')) {
-    console.error('Usage: node commandcode-login.mjs <session-state>'); process.exitCode = 1;
+    console.error('Usage: node commandcode-login.mjs <session-state> [--session-file <local-storage-state.json>]'); process.exitCode = 1;
   } else {
     console.error('Keep this terminal private. Credentials are printed only here and are not saved to disk.');
-    const server = startReceiver(state, result => console.log(JSON.stringify(result)));
+    const server = startReceiver(state, async result => {
+      const enriched = await enrichSubscription(result, sessionFile);
+      if (sessionFile && !enriched.planId) console.error('Subscription unavailable or account mismatch; plan left unknown.');
+      console.log(JSON.stringify(enriched));
+    });
     server.on('error', () => { console.error('Unable to start callback receiver'); process.exitCode = 1; });
     server.on('listening', () => {
       const callback = `http://127.0.0.1:${server.address().port}/callback`;

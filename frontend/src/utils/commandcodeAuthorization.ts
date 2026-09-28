@@ -11,6 +11,7 @@ export interface CommandCodeAuthorizationResult {
   userId: string
   userName: string
   keyName: string
+  planId?: string
 }
 export const COMMANDCODE_AUTH_TTL_MS = 10 * 60 * 1000
 export function createCommandCodeAuthorizationSession(now = Date.now()): CommandCodeAuthorizationSession {
@@ -38,12 +39,16 @@ export function consumeCommandCodeAuthorizationResult(
   for (const key of ['userId', 'userName', 'keyName']) {
     if (body[key] !== undefined && (typeof body[key] !== 'string' || (body[key] as string).length > 4096)) throw new Error('invalid')
   }
-  const result = {
+  const planId = body.planId
+  if (planId !== undefined && (typeof planId !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(planId)
+    || body.subscriptionStatus !== 'active' || !body.userId || body.subscriptionUserId !== body.userId)) throw new Error('invalid')
+  const result: CommandCodeAuthorizationResult = {
     apiKey,
     userId: (body.userId as string | undefined) || '',
     userName: (body.userName as string | undefined) || '',
     keyName: (body.keyName as string | undefined) || ''
   }
+  if (typeof planId === 'string') result.planId = planId
   session.consumed = true
   return result
 }

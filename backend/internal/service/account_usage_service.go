@@ -117,6 +117,7 @@ const (
 
 // UsageCache 封装账户使用量相关的缓存
 type UsageCache struct {
+	commandCodeCache  sync.Map           // credential-scoped CommandCode billing snapshots
 	apiCache          sync.Map           // accountID -> *apiUsageCache
 	windowStatsCache  sync.Map           // accountID -> *windowStatsCache
 	antigravityCache  sync.Map           // accountID -> *antigravityUsageCache
@@ -348,6 +349,9 @@ func batchUsageErrorMessage(err error) string {
 func (s *AccountUsageService) getUsageForAccount(ctx context.Context, account *Account, forceProbe bool) (*UsageInfo, error) {
 	if account == nil {
 		return nil, fmt.Errorf("account is required")
+	}
+	if account.Platform == "commandcode" {
+		return s.getCommandCodeUsage(ctx, account, forceProbe)
 	}
 	accountID := account.ID
 

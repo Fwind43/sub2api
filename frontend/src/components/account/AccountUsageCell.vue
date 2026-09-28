@@ -1,8 +1,23 @@
 <template>
   <div ref="rootRef" v-if="showUsageWindows">
+    <!-- CommandCode billing windows -->
+    <template v-if="account.platform === 'commandcode'">
+      <div class="space-y-1">
+        <div v-if="loading" class="h-3 w-28 animate-pulse rounded bg-gray-200 dark:bg-gray-700"></div>
+        <div v-if="error || usageInfo?.error" class="max-w-[200px] truncate text-xs text-amber-600 dark:text-amber-400" :title="error || usageInfo?.error || undefined">
+          {{ error || usageInfo?.error }}
+        </div>
+        <UsageProgressBar v-if="usageInfo?.five_hour" label="5h" :utilization="usageInfo.five_hour.utilization" :resets-at="usageInfo.five_hour.resets_at" color="indigo" />
+        <UsageProgressBar v-if="usageInfo?.seven_day" label="7d" :utilization="usageInfo.seven_day.utilization" :resets-at="usageInfo.seven_day.resets_at" color="emerald" />
+        <span v-if="!loading && !error && !usageInfo?.error && !usageInfo?.five_hour && !usageInfo?.seven_day" class="text-xs text-gray-400">—</span>
+        <button type="button" class="inline-flex items-center rounded px-1.5 py-0.5 text-[9px] font-medium text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:text-blue-400 dark:hover:bg-blue-900/30" :disabled="loading || activeQueryLoading" @click="loadActiveUsage">
+          {{ t('admin.accounts.usageWindow.activeQuery') }}
+        </button>
+      </div>
+    </template>
     <!-- Anthropic OAuth and Setup Token accounts: fetch real usage data -->
     <template
-      v-if="
+      v-else-if="
         account.platform === 'anthropic' &&
         (account.type === 'oauth' || account.type === 'setup-token')
       "
@@ -743,6 +758,7 @@ let visibilityObserver: IntersectionObserver | null = null
 
 // Show usage windows for OAuth and Setup Token accounts
 const showUsageWindows = computed(() => {
+  if (props.account.platform === 'commandcode') return true
   // Gemini: we can always compute local usage windows from DB logs (simulated quotas).
   if (props.account.platform === 'gemini') return true
   // CN providers: apikey 账号也有滚动用量窗口（coding plan）或余额（payg），
@@ -760,6 +776,7 @@ const showUsageWindows = computed(() => {
 })
 
 const shouldFetchUsage = computed(() => {
+  if (props.account.platform === 'commandcode') return true
   if (props.account.platform === 'anthropic') {
     return props.account.type === 'oauth' || props.account.type === 'setup-token'
   }
@@ -1494,6 +1511,10 @@ const attachVisibilityObserver = () => {
 }
 
 const loadActiveUsage = async () => {
+  if (props.account.platform === 'commandcode') {
+    await loadUsage({ source: 'active', bypassCache: true })
+    return
+  }
   activeQueryLoading.value = true
   try {
     usageInfo.value = await adminAPI.accounts.getUsage(props.account.id, 'active', true)

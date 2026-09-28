@@ -732,6 +732,7 @@ const buildDefaultTodayStats = (): WindowStats => ({
 })
 
 const accountSupportsBatchUsage = (account: Account) => {
+  if (account.platform === 'commandcode') return true
   if (account.platform === 'anthropic') {
     return account.type === 'oauth' || account.type === 'setup-token'
   }
@@ -1645,6 +1646,10 @@ function grok45ResponsesPlanIsHeavy(snapshot: Record<string, any> | undefined): 
 // from grok-4.5 Responses (or a carried 4.5 hint).
 function getAccountPlanType(row: any): string | undefined {
   if (!row) return undefined
+  if (row.platform === 'commandcode') {
+    const usage = usageBatchByAccountId.value[String(row.id)]
+    return firstNonBlankString(usage?.subscription_tier, row.extra?.subscription_tier, row.credentials?.plan_type)
+  }
   if (row.platform === 'grok') {
     const extra = (row.extra || {}) as Record<string, any>
     const billing = extra.grok_billing_snapshot as Record<string, any> | undefined
