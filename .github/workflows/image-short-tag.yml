@@ -11,22 +11,58 @@ concurrency:
   group: publish-short-image-tag
   cancel-in-progress: false
 jobs:
-  retag:
+  build:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+      - name: Resolve short version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(tr -d '\r\n' < backend/cmd/server/VERSION)"
+          test "$version" = '0.2.9-fwind'
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Tag verified image without rebuilding
+      - name: Build and publish current source
+        id: image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ghcr.io/fwind43/sub2api:${{ steps.version.outputs.value }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.version.outputs.value }}
+          build-args: |
+            VERSION=${{ steps.version.outputs.value }}
+            COMMIT=${{ github.sha }}
+            GOPROXY=https://proxy.golang.org,direct
+            GOSUMDB=sum.golang.org
+          cache-from: type=gha,scope=short-image
+          cache-to: type=gha,mode=max,scope=short-image
+      - name: Verify published manifest
         env:
           IMAGE: ghcr.io/fwind43/sub2api
-          DIGEST: sha256:c2ad1e67517f07047f16ca078c2e5229859c4a8b26e6ffb98d806f75c3b7bbc2
+          VERSION: ${{ steps.version.outputs.value }}
+          EXPECTED_DIGEST: ${{ steps.image.outputs.digest }}
+          SOURCE_SHA: ${{ github.sha }}
+        shell: bash
         run: |
           set -euo pipefail
-          docker buildx imagetools create --tag "$IMAGE:0.2.9-fwind" "$IMAGE@$DIGEST"
-          docker buildx imagetools inspect "$IMAGE:0.2.9-fwind" --raw > manifest.json
-          test "sha256:$(sha256sum manifest.json | cut -d ' ' -f1)" = "$DIGEST"
-          echo "Verified $IMAGE:0.2.9-fwind at $DIGEST" >> "$GITHUB_STEP_SUMMARY"
+          docker buildx imagetools inspect "$IMAGE:$VERSION" --raw > manifest.json
+          actual="sha256:$(sha256sum manifest.json | cut -d ' ' -f1)"
+          test "$actual" = "$EXPECTED_DIGEST"
+          echo "Verified $IMAGE:$VERSION at $actual from $SOURCE_SHA" >> "$GITHUB_STEP_SUMMARY"
