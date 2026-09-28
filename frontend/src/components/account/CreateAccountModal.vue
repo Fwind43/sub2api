@@ -228,6 +228,18 @@
             <PlatformIcon platform="opencode_go" size="sm" />
             OpenCode
           </button>
+          <button
+            type="button"
+            @click="selectCommandCodePlatform()"
+            :class="[
+              'flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2.5 text-sm font-medium transition-all',
+              form.platform === 'commandcode'
+                ? 'bg-white text-primary-600 shadow-sm dark:bg-dark-600 dark:text-primary-400'
+                : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
+            ]"
+          >
+            CommandCode
+          </button>
         </div>
       </div>
 
@@ -4055,6 +4067,8 @@ const apiKeyBaseUrlPlaceholder = computed(() => {
       return 'https://api.openai.com'
     case 'gemini':
       return 'https://generativelanguage.googleapis.com'
+    case 'commandcode':
+      return 'https://api.commandcode.ai'
     case 'grok':
       return 'https://api.x.ai/v1'
     default:
@@ -4068,6 +4082,8 @@ const apiKeyValuePlaceholder = computed(() => {
       return 'sk-proj-...'
     case 'gemini':
       return 'AIza...'
+    case 'commandcode':
+      return 'CommandCode API key'
     case 'grok':
       return 'xai-...'
     case 'kimi':
@@ -4275,6 +4291,13 @@ function selectCNPlatform(platform: CnProviderPlatform) {
   apiKeyBaseUrl.value = defaultCNBaseUrl(platform, accountMode.value, apiProtocol.value)
   resetAdaptiveBaseUrls(platform, accountMode.value)
 }
+function selectCommandCodePlatform() {
+  commandCodePreset.value = false
+  form.platform = 'commandcode'
+  accountCategory.value = 'apikey'
+  apiKeyBaseUrl.value = 'https://api.commandcode.ai'
+}
+
 function selectOpenCodeGoPlatform() {
   form.platform = 'opencode_go'
   form.type = 'apikey'
@@ -4877,7 +4900,10 @@ watch(
   () => form.platform,
   (newPlatform) => {
     // Reset base URL based on platform
-    if (isCNProviderPlatform(newPlatform) || newPlatform === 'opencode_go') {
+    if (newPlatform === 'commandcode') {
+      apiKeyBaseUrl.value = 'https://api.commandcode.ai'
+      accountCategory.value = 'apikey'
+    } else if (isCNProviderPlatform(newPlatform) || newPlatform === 'opencode_go') {
       const mode = newPlatform === 'opencode_go' ? openCodeAccountMode.value : accountMode.value
       apiKeyBaseUrl.value = defaultCNBaseUrl(newPlatform, mode, apiProtocol.value)
     } else {
@@ -5833,7 +5859,9 @@ const handleSubmit = async () => {
 
   // Determine default base URL based on platform
   const defaultBaseUrl =
-    form.platform === 'openai'
+    form.platform === 'commandcode'
+      ? 'https://api.commandcode.ai'
+      : form.platform === 'openai'
       ? 'https://api.openai.com'
       : form.platform === 'gemini'
         ? 'https://generativelanguage.googleapis.com'

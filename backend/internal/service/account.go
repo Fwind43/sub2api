@@ -298,7 +298,7 @@ func (a *Account) IsCNProvider() bool {
 // openai/grok 原生走 OpenAI 网关；国产供应商同为 OpenAI Chat Completions
 // 兼容上游，也经 OpenAI 网关转发。OpenCode 同样经 OpenAI 网关按模型分流。
 func (a *Account) IsOpenAICompatible() bool {
-	return a != nil && (a.Platform == PlatformOpenAI || a.Platform == PlatformGrok || a.IsCNProvider() || a.IsOpenCodeGo())
+	return a != nil && (a.Platform == PlatformOpenAI || a.Platform == PlatformGrok || a.Platform == PlatformCommandCode || a.IsCNProvider() || a.IsOpenCodeGo())
 }
 
 func (a *Account) GeminiOAuthType() string {
@@ -1353,6 +1353,9 @@ func (a *Account) IsOpenAIApiKey() bool {
 // 适用 openai、国产 OpenAI 兼容供应商（kimi/zhipu/deepseek）与 OpenCode Go；
 // grok 走 GetGrokBaseURL，此处对 grok 返回 "" 以保持原有行为。
 func (a *Account) GetOpenAIBaseURL() string {
+	if a != nil && a.Platform == PlatformCommandCode {
+		return "https://api.commandcode.ai"
+	}
 	if !a.IsOpenAI() && !a.IsCNProvider() && !a.IsOpenCodeGo() {
 		return ""
 	}
@@ -1756,6 +1759,9 @@ func (a *Account) GetOpenAIApiKey() string {
 // 注意 IsOpenAIApiKey 语义上仅指 openai 平台账号，调度倍率/WS 能力门控
 // 继续以其为准，不受本方法影响。
 func (a *Account) GetOpenAIProtocolAPIKey() string {
+	if a != nil && a.Platform == PlatformCommandCode && a.Type == AccountTypeAPIKey {
+		return a.GetCredential("api_key")
+	}
 	if a == nil {
 		return ""
 	}

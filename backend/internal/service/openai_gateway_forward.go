@@ -159,6 +159,10 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		return s.forwardGrokResponses(ctx, c, account, body, originalModel, reqStream, startTime)
 	}
 
+	if account.Platform == PlatformCommandCode {
+		return s.forwardResponsesViaRawChatCompletions(ctx, c, account, body)
+	}
+
 	if account.IsOpenCodeGo() {
 		mapped := resolveOpenCodeGoMappedModel(account, body, "")
 		switch openCodeGoNativeProtocol(account, mapped) {
