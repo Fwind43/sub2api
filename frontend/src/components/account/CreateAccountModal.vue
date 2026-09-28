@@ -1371,6 +1371,10 @@
 
       <!-- API Key input (only for apikey type, excluding Antigravity which has its own fields) -->
       <div v-if="form.type === 'apikey' && form.platform !== 'antigravity'" class="space-y-4">
+        <CommandCodeAuthorization
+          v-if="props.show && form.platform === 'commandcode'"
+          @authorized="onCommandCodeAuthorized"
+        />
         <div v-if="form.platform === 'openai' && accountCategory === 'apikey'">
           <label for="commandcode-gateway-preset" class="input-label">{{ t('admin.accounts.gatewayPreset.label') }}</label>
           <Select
@@ -3913,6 +3917,8 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch, nextTick } from 'vue'
 import { normalizeCommandCodeBaseUrl } from '@/utils/commandcode'
+import CommandCodeAuthorization from './CommandCodeAuthorization.vue'
+import type { CommandCodeAuthorizationResult } from '@/utils/commandcodeAuthorization'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 
@@ -4181,6 +4187,16 @@ const accountCategory = ref<'oauth-based' | 'apikey' | 'bedrock' | 'service_acco
 const addMethod = ref<AddMethod>('oauth') // For oauth-based: 'oauth' or 'setup-token'
 const apiKeyBaseUrl = ref('https://api.anthropic.com')
 const apiKeyValue = ref('')
+const commandCodeAuthorization = ref<CommandCodeAuthorizationResult | null>(null)
+function onCommandCodeAuthorized(result: CommandCodeAuthorizationResult) {
+  apiKeyValue.value = result.apiKey
+  commandCodeAuthorization.value = result
+}
+watch([apiKeyValue, () => form.platform, () => props.show], ([key, platform, show]) => {
+  if (!show || platform !== 'commandcode' || key !== commandCodeAuthorization.value?.apiKey) {
+    commandCodeAuthorization.value = null
+  }
+})
 const upstreamBillingAutoProbeEnabled = ref(true)
 
 // ── 国产供应商（Kimi / Zhipu / DeepSeek）账号类型、API 协议与端点 ──
@@ -4294,6 +4310,7 @@ function selectCNPlatform(platform: CnProviderPlatform) {
 function selectCommandCodePlatform() {
   commandCodePreset.value = false
   form.platform = 'commandcode'
+  form.type = 'apikey'
   accountCategory.value = 'apikey'
   apiKeyBaseUrl.value = 'https://api.commandcode.ai'
 }
@@ -5367,6 +5384,7 @@ const submitCreateAccount = async (payload: CreateAccountRequest) => {
 
 // Methods
 const resetForm = () => {
+  commandCodeAuthorization.value = null
   commandCodePreset.value = false
   step.value = 1
   form.name = ''
@@ -5873,6 +5891,12 @@ const handleSubmit = async () => {
   const credentials: Record<string, unknown> = {
     base_url: apiKeyBaseUrl.value.trim() || defaultBaseUrl,
     api_key: apiKeyValue.value.trim()
+  }
+  const authorization = commandCodeAuthorization.value
+  if (form.platform === 'commandcode' && authorization && authorization.apiKey === credentials.api_key) {
+    credentials.user_id = authorization.userId
+    credentials.user_name = authorization.userName
+    credentials.key_name = authorization.keyName
   }
   if (form.platform === 'gemini') {
     credentials.tier_id = geminiTierAIStudio.value
