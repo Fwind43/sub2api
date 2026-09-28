@@ -4,23 +4,24 @@ export default {
         "title": "CommandCode GO sign-in",
         "description": "Authorize through the CommandCode CLI login page to obtain a credential for the native GO channel. This does not use the standard API endpoint or provide automatic token refresh. Manual key entry remains available below.",
         "start": "Start a new authorization",
-        "open": "Open CommandCode sign-in",
-        "instructions": "Open the sign-in link and authorize your existing GO account. This remote-friendly fallback does not start a local callback server. If redirected to an unavailable 127.0.0.1 page, copy the complete address from that tab and paste it below within 10 minutes. If no callback address appears, this fallback cannot complete; use a CLI credential instead.",
-        "result": "Complete callback address",
-        "placeholder": "Paste the complete http://127.0.0.1:18765/callback?... address",
-        "secretWarning": "The callback address contains a secret. Do not share it, paste it into chat, or send it to third-party sites. Only paste it here.",
+        "instructions": "Download the receiver and run the command below locally. Open the login URL printed in that terminal, authorize, then paste its JSON result below within 10 minutes. The receiver selects a free loopback port; copying the callback address does not work.",
+        "result": "Authorization result JSON",
+        "placeholder": "Paste the JSON result printed by the local receiver",
+        "secretWarning": "The JSON result contains your credential. Keep the terminal private; do not share, send to chat or save the result. Stop an unused receiver with Ctrl+C.",
         "accept": "Use authorization result",
         "cancel": "Cancel authorization",
         "accepted": "Authorization result validated and filled in. Save the account to finish. GO subscription status and upstream access have not yet been verified.",
         "errors": {
           "used": "This authorization was already used. Start a new one.",
           "expired": "Authorization expired. Start a new one.",
-          "invalid": "Invalid callback address. Copy the complete address from this authorization.",
-          "state": "This callback does not match the current authorization. Start again.",
+          "invalid": "Invalid authorization JSON. Paste the local receiver result for this session.",
+          "state": "This result does not match the current authorization. Start again.",
           "denied": "Authorization was denied. Start again when ready.",
           "missingKey": "The callback does not contain a valid CLI credential.",
           "unavailable": "Secure randomness is unavailable in this browser. Use a supported browser or enter a CLI credential manually."
-        }
+        },
+        "download": "Download local receiver (Node.js 20+)",
+        "localCommand": "On this browser computer (not the remote server), open a terminal in the download folder and run:"
       },
       gatewayPreset: {
         label: "Connection preset",

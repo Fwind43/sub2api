@@ -5,7 +5,9 @@
     <button type="button" class="btn btn-primary" @click="start">{{ t('admin.accounts.commandCodeAuth.start') }}</button>
     <template v-if="session">
       <p class="input-hint">{{ t('admin.accounts.commandCodeAuth.instructions') }}</p>
-      <a :href="authorizationUrl" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer" class="text-sm text-primary-600 underline dark:text-primary-400">{{ t('admin.accounts.commandCodeAuth.open') }}</a>
+      <a href="/commandcode-login.mjs" download="commandcode-login.mjs" class="text-sm text-primary-600 underline dark:text-primary-400">{{ t('admin.accounts.commandCodeAuth.download') }}</a>
+      <p class="input-hint">{{ t('admin.accounts.commandCodeAuth.localCommand') }}</p>
+      <code data-testid="commandcode-receiver-command" class="block select-all break-all rounded bg-gray-100 p-3 text-xs dark:bg-dark-700">{{ receiverCommand }}</code>
       <label class="input-label" for="commandcode-callback-result">{{ t('admin.accounts.commandCodeAuth.result') }}</label>
       <input id="commandcode-callback-result" v-model="callbackResult" type="password" class="input font-mono" autocomplete="off" autocapitalize="off" :spellcheck="false" :placeholder="t('admin.accounts.commandCodeAuth.placeholder')" @keydown.enter.prevent="accept" />
       <p class="input-hint">{{ t('admin.accounts.commandCodeAuth.secretWarning') }}</p>
@@ -18,25 +20,22 @@
     <p v-if="accepted" class="text-sm text-green-600 dark:text-green-400" role="status">{{ t('admin.accounts.commandCodeAuth.accepted') }}</p>
   </section>
 </template>
-
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   createCommandCodeAuthorizationSession,
-  commandCodeAuthorizationUrl,
   consumeCommandCodeAuthorizationResult,
   type CommandCodeAuthorizationSession,
   type CommandCodeAuthorizationResult
 } from '@/utils/commandcodeAuthorization'
-
 const emit = defineEmits<{ authorized: [result: CommandCodeAuthorizationResult] }>()
 const { t } = useI18n()
 const session = ref<CommandCodeAuthorizationSession | null>(null)
 const callbackResult = ref('')
 const error = ref('')
 const accepted = ref(false)
-const authorizationUrl = computed(() => session.value ? commandCodeAuthorizationUrl(session.value) : '')
+const receiverCommand = computed(() => session.value ? `node commandcode-login.mjs ${session.value.state}` : '')
 function cancel() {
   if (session.value) session.value.consumed = true
   session.value = null
