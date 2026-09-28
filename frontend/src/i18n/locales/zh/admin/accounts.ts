@@ -1,5 +1,10 @@
 export default {
     accounts: {
+      gatewayPreset: {
+        label: "接入预设",
+        custom: "默认 / 自定义",
+        hint: "填写兼容网关地址和 API Key，请勿填写 CommandCode 官网地址或 Cookie。已启用 OpenAI 透传。",
+      },
       title: '账号管理',
       description: '管理 AI 平台账号和 Cookie',
       createAccount: '添加账号',

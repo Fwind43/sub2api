@@ -28,6 +28,12 @@
 
       <!-- API Key fields (only for apikey type) -->
       <div v-if="account.type === 'apikey'" class="space-y-4">
+        <p
+          v-if="account.platform === 'openai' && account.extra?.provider === 'commandcode_gateway'"
+          class="input-hint"
+        >
+          {{ t('admin.accounts.gatewayPreset.hint') }}
+        </p>
         <div v-if="!isCNApiKeyAccount || editApiProtocol !== 'adaptive'">
           <label class="input-label">{{ t('admin.accounts.baseUrl') }}</label>
           <input

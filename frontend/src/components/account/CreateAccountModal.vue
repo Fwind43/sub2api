@@ -231,17 +231,6 @@
         </div>
       </div>
 
-      <div class="rounded-lg border border-gray-200 p-3 dark:border-dark-600">
-        <button type="button" class="btn btn-secondary" @click="selectCommandCodePreset">
-          CommandCode (compatible gateway)
-        </button>
-        <p v-if="commandCodePreset" class="input-hint mt-2" role="status">
-          CommandCode adapter mode: enter your compatible gateway base URL and its API key,
-          not a CommandCode website URL or browser cookie. Uses OpenAI API-key passthrough.
-          Upstream account selection remains in the adapter; this entry represents one gateway.
-        </p>
-      </div>
-
       <!-- Account Type Selection (Anthropic) -->
       <div v-if="form.platform === 'anthropic'">
         <label class="input-label">{{ t('admin.accounts.accountType') }}</label>
@@ -1370,6 +1359,19 @@
 
       <!-- API Key input (only for apikey type, excluding Antigravity which has its own fields) -->
       <div v-if="form.type === 'apikey' && form.platform !== 'antigravity'" class="space-y-4">
+        <div v-if="form.platform === 'openai' && accountCategory === 'apikey'">
+          <label for="commandcode-gateway-preset" class="input-label">{{ t('admin.accounts.gatewayPreset.label') }}</label>
+          <Select
+            id="commandcode-gateway-preset"
+            v-model="gatewayPreset"
+            :options="gatewayPresetOptions"
+            :aria-label="t('admin.accounts.gatewayPreset.label')"
+            :aria-describedby="commandCodePreset ? 'commandcode-gateway-hint' : undefined"
+          />
+          <p v-if="commandCodePreset" id="commandcode-gateway-hint" class="input-hint" role="status">
+            {{ t('admin.accounts.gatewayPreset.hint') }}
+          </p>
+        </div>
         <div v-if="!isMultiProtocolPlatform || apiProtocol !== 'adaptive'">
           <label class="input-label">{{ t('admin.accounts.baseUrl') }}</label>
           <input
@@ -4437,6 +4439,20 @@ const applyGrokOAuthUpstreamConfig = (credentials: Record<string, unknown>) => {
 const interceptWarmupRequests = ref(false)
 const autoPauseOnExpired = ref(true)
 const commandCodePreset = ref(false)
+const gatewayPresetOptions = computed(() => [
+  { value: 'custom', label: t('admin.accounts.gatewayPreset.custom') },
+  { value: 'commandcode', label: 'CommandCode' }
+])
+const gatewayPreset = computed({
+  get: () => commandCodePreset.value ? 'commandcode' : 'custom',
+  set: (value: string | number | boolean | null | undefined) => {
+    if (value === 'commandcode' && !commandCodePreset.value) {
+      void selectCommandCodePreset()
+    } else if (value !== 'commandcode') {
+      commandCodePreset.value = false
+    }
+  }
+})
 const selectCommandCodePreset = async () => {
   form.platform = 'openai'
   accountCategory.value = 'apikey'

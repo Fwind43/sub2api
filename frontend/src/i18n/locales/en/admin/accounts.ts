@@ -1,5 +1,10 @@
 export default {
     accounts: {
+      gatewayPreset: {
+        label: "Connection preset",
+        custom: "Default / Custom",
+        hint: "Enter the compatible gateway URL and API key, not the CommandCode website URL or a cookie. OpenAI passthrough is enabled.",
+      },
       title: 'Account Management',
       description: 'Manage AI platform accounts and credentials',
       createAccount: 'Create Account',
