@@ -130,6 +130,10 @@ func (c *Client) Generate(ctx context.Context, apiKey, model string, payload Req
 	if payload.MaxComplete > 0 {
 		maxTokens = payload.MaxComplete
 	}
+	// CommandCode requires a positive limit even when the caller omits it.
+	if maxTokens <= 0 {
+		maxTokens = 4096
+	}
 	body := map[string]any{
 		"config": map[string]any{
 			"workingDir":    "/tmp",

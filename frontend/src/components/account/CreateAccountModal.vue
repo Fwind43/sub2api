@@ -4195,11 +4195,7 @@ function onCommandCodeAuthorized(result: CommandCodeAuthorizationResult) {
   apiKeyValue.value = result.apiKey
   commandCodeAuthorization.value = result
 }
-watch([apiKeyValue, () => form.platform, () => props.show], ([key, platform, show]) => {
-  if (!show || platform !== 'commandcode' || key !== commandCodeAuthorization.value?.apiKey) {
-    commandCodeAuthorization.value = null
-  }
-})
+
 const upstreamBillingAutoProbeEnabled = ref(true)
 
 // ── 国产供应商（Kimi / Zhipu / DeepSeek）账号类型、API 协议与端点 ──
@@ -5015,6 +5011,12 @@ watch(
     grokOAuth.resetState()
   }
 )
+
+watch([apiKeyValue, () => form.platform, () => props.show], ([key, platform, show]) => {
+  if (!show || platform !== 'commandcode' || key !== commandCodeAuthorization.value?.apiKey) {
+    commandCodeAuthorization.value = null
+  }
+})
 
 watch([() => form.platform, accountCategory], ([platform, category]) => {
   if (platform !== 'openai' || category !== 'apikey') commandCodePreset.value = false

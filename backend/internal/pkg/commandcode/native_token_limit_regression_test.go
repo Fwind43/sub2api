@@ -14,6 +14,10 @@ func TestNativeTokenLimitRegression(t *testing.T) {
 		name                   string
 		tokens, complete, want int
 	}{
+		{"omitted_tokens", 0, 0, 4096},
+		{"negative_tokens", -1, 0, 4096},
+		{"negative_completion", 0, -1, 4096},
+		{"positive_tokens_negative_completion", 37, -1, 37},
 		{"max_tokens", 37, 0, 37},
 		{"max_completion_tokens", 0, 43, 43},
 		{"completion_precedence", 37, 43, 43},
