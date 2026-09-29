@@ -31,4 +31,9 @@ describe('upstream provider aliases', () => {
   it('ignores empty IDs and leaves malformed or unprefixed IDs intact', () => {
     expect(merge(['', ' ', '/model', 'provider/', 'bare'], [], []).models).toEqual(['/model', 'provider/', 'bare'])
   })
+  it('replaces stale models when refreshing a changed upstream catalog', () => {
+    expect(merge(['provider/new'], ['old'], [{ from: 'old', to: 'provider/old' }], true)).toEqual({ models: ['new'], mappings: [{ from: 'new', to: 'provider/new' }] })
+    const manual = [{ from: 'custom', to: 'other/target' }]
+    expect(merge(['provider/new'], ['custom', 'old'], [...manual, { from: 'old', to: 'provider/old' }], true)).toEqual({ models: ['custom', 'new'], mappings: [...manual, { from: 'new', to: 'provider/new' }] })
+  })
 })

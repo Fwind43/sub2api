@@ -330,7 +330,7 @@ const syncUpstreamModels = async () => {
 
     const useAliases = (props.platform ?? props.syncCredentials?.platform) === 'commandcode'
     const synced = useAliases
-      ? mergeUpstreamModelAliases(upstreamModels, props.modelValue, props.modelMappings ?? [])
+      ? mergeUpstreamModelAliases(upstreamModels, props.modelValue, props.modelMappings ?? [], true)
       : { models: [...new Set([...props.modelValue, ...upstreamModels])], mappings: [] }
     const addedCount = synced.models.filter(model => !props.modelValue.includes(model)).length
     if (useAliases) emit('update:modelMappings', synced.mappings)

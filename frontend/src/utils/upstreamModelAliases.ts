@@ -2,15 +2,24 @@ export interface UpstreamModelMapping { from: string; to: string }
 
 // Strip only the provider segment, and retain the full ID as the route target.
 export function mergeUpstreamModelAliases(
-  upstream: string[], selected: string[], existing: UpstreamModelMapping[]
+  upstream: string[], selected: string[], existing: UpstreamModelMapping[], refresh = false
 ): { models: string[]; mappings: UpstreamModelMapping[] } {
   const ids = [...new Set(upstream.map(id => id.trim()).filter(Boolean))]
-  const mappings = existing.map(mapping => ({ ...mapping }))
-  const models = [...selected]
   const aliasOf = (id: string) => {
     const slash = id.indexOf('/')
     return slash > 0 && slash < id.length - 1 ? id.slice(slash + 1) : id
   }
+  // Only prune aliases previously generated for this upstream provider.
+  // Other selected entries and custom routes remain under the admin's control.
+  const providers = new Set(ids.map(id => id.split('/')[0]))
+  const stale = refresh ? existing.filter(mapping => {
+    const slash = mapping.to.indexOf('/')
+    return slash > 0 && providers.has(mapping.to.slice(0, slash))
+      && mapping.from === aliasOf(mapping.to) && !ids.includes(mapping.to)
+  }) : []
+  const staleNames = new Set(stale.map(mapping => mapping.from))
+  const mappings = existing.filter(mapping => !stale.includes(mapping)).map(mapping => ({ ...mapping }))
+  const models = selected.filter(model => !staleNames.has(model))
   const counts = new Map<string, number>()
   for (const id of ids) counts.set(aliasOf(id), (counts.get(aliasOf(id)) ?? 0) + 1)
   for (const id of ids) {
