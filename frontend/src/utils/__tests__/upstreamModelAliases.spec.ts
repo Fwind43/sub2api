@@ -36,4 +36,23 @@ describe('upstream provider aliases', () => {
     const manual = [{ from: 'custom', to: 'other/target' }]
     expect(merge(['provider/new'], ['custom', 'old'], [...manual, { from: 'old', to: 'provider/old' }], true)).toEqual({ models: ['custom', 'new'], mappings: [...manual, { from: 'new', to: 'provider/new' }] })
   })
+
+  it('supports colon providers without rewriting canonical route IDs', () => {
+    expect(merge(['fixture:deepseek-v4.1-flash'], [], [])).toEqual({
+      models: ['deepseek-v4.1-flash'], mappings: [{ from: 'deepseek-v4.1-flash', to: 'fixture:deepseek-v4.1-flash' }]
+    })
+    expect(merge(['fixture:org/model'], [], []).models).toEqual(['org/model'])
+  })
+  it('keeps mixed-separator collisions explicit', () => {
+    expect(merge(['one:model', 'two/model'], [], []).models).toEqual(['one:model', 'two/model'])
+  })
+  it('refreshes colon aliases and preserves manual mappings', () => {
+    const manual = { from: 'custom', to: 'elsewhere:target' }
+    const result = merge(['fixture:new'], ['old', 'custom'], [{ from: 'old', to: 'fixture:old' }, manual], true)
+    expect(result).toEqual({ models: ['custom', 'new'], mappings: [manual, { from: 'new', to: 'fixture:new' }] })
+    expect(merge(['fixture:new'], result.models, result.mappings, true)).toEqual(result)
+  })
+  it('does not strip malformed colon IDs', () => {
+    expect(merge([':model', 'provider:'], [], []).models).toEqual([':model', 'provider:'])
+  })
 })

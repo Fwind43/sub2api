@@ -50,6 +50,10 @@ type Result struct {
 }
 
 func (c *Client) Generate(ctx context.Context, apiKey, model string, payload Request, onDelta func(string) error) (Result, error) {
+	return c.generate(ctx, apiKey, model, payload, onDelta, true)
+}
+
+func (c *Client) generate(ctx context.Context, apiKey, model string, payload Request, onDelta func(string) error, repair bool) (Result, error) {
 	if strings.TrimSpace(apiKey) == "" {
 		return Result{}, fmt.Errorf("missing CommandCode API key")
 	}
@@ -198,6 +202,13 @@ func (c *Client) Generate(ctx context.Context, apiKey, model string, payload Req
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
 		detail, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
+		if repair && response.StatusCode == http.StatusForbidden && strings.Contains(string(detail), "Model/provider not recognized:") {
+			response.Body.Close()
+			resolved, lookupErr := c.resolveRejectedModel(ctx, apiKey, model)
+			if lookupErr == nil && resolved != model {
+				return c.generate(ctx, apiKey, resolved, payload, onDelta, false)
+			}
+		}
 		return Result{}, fmt.Errorf("upstream status %d: %s", response.StatusCode, truncate(string(detail), 400))
 	}
 	result := Result{}

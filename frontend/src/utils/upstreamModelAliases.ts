@@ -5,15 +5,16 @@ export function mergeUpstreamModelAliases(
   upstream: string[], selected: string[], existing: UpstreamModelMapping[], refresh = false
 ): { models: string[]; mappings: UpstreamModelMapping[] } {
   const ids = [...new Set(upstream.map(id => id.trim()).filter(Boolean))]
+  const separatorOf = (id: string) => id.search(/[:/]/)
   const aliasOf = (id: string) => {
-    const slash = id.indexOf('/')
-    return slash > 0 && slash < id.length - 1 ? id.slice(slash + 1) : id
+    const separator = separatorOf(id)
+    return separator > 0 && separator < id.length - 1 ? id.slice(separator + 1) : id
   }
   // Only prune aliases previously generated for this upstream provider.
   // Other selected entries and custom routes remain under the admin's control.
-  const providers = new Set(ids.map(id => id.split('/')[0]))
+  const providers = new Set(ids.filter(id => separatorOf(id) > 0).map(id => id.slice(0, separatorOf(id))))
   const stale = refresh ? existing.filter(mapping => {
-    const slash = mapping.to.indexOf('/')
+    const slash = separatorOf(mapping.to)
     return slash > 0 && providers.has(mapping.to.slice(0, slash))
       && mapping.from === aliasOf(mapping.to) && !ids.includes(mapping.to)
   }) : []
