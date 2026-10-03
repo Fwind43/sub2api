@@ -271,6 +271,8 @@ type PricingService struct {
 	// fallback/override 文件在最近一次成功重建时的内容指纹，定时器据此判断是否
 	// 需要从本地目录缓存重建叠加层。
 	customFilesHash string
+	// globalPricingMu 串行化全局统一价文件的读改写与热重载，避免并发写丢失更新。
+	globalPricingMu sync.Mutex
 
 	// 停止信号
 	stopCh chan struct{}
@@ -461,22 +463,25 @@ func (s *PricingService) syncWithRemote() error {
 	return nil
 }
 
-// hasCustomPricingFiles 报告是否配置了 fallback/override 任一文件路径（不要求文件存在）。
+// hasCustomPricingFiles 报告是否存在可热重载的定价叠加文件（fallback/override 路径，或
+// 管理页写入的全局统一价文件；不要求文件已存在）。
 func (s *PricingService) hasCustomPricingFiles() bool {
 	if s == nil || s.cfg == nil {
 		return false
 	}
-	return strings.TrimSpace(s.cfg.Pricing.FallbackFile) != "" || strings.TrimSpace(s.cfg.Pricing.OverrideFile) != ""
+	return strings.TrimSpace(s.cfg.Pricing.FallbackFile) != "" ||
+		strings.TrimSpace(s.cfg.Pricing.OverrideFile) != "" ||
+		strings.TrimSpace(s.globalPricingFilePath()) != ""
 }
 
-// customPricingFilesFingerprint 返回 fallback、override 两个文件当前内容的联合 sha256。
-// 每个文件以"长度前缀 + 正文"参与计算，不可读的文件按空正文处理；未配置任何文件返回空串。
+// customPricingFilesFingerprint 返回 fallback、override 与全局统一价三个文件当前内容的联合
+// sha256。每个文件以"长度前缀 + 正文"参与计算，不可读的文件按空正文处理；未配置任何文件返回空串。
 func (s *PricingService) customPricingFilesFingerprint() string {
 	if !s.hasCustomPricingFiles() {
 		return ""
 	}
 	h := sha256.New()
-	for _, path := range []string{s.cfg.Pricing.FallbackFile, s.cfg.Pricing.OverrideFile} {
+	for _, path := range []string{s.cfg.Pricing.FallbackFile, s.cfg.Pricing.OverrideFile, s.globalPricingFilePath()} {
 		var body []byte
 		if p := strings.TrimSpace(path); p != "" {
 			body, _ = os.ReadFile(p)
@@ -489,10 +494,11 @@ func (s *PricingService) customPricingFilesFingerprint() string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// validateCustomPricingFiles 要求每个已配置且存在的 fallback/override 文件可读且为 JSON
-// 对象，任一不满足即返回带路径的错误；文件不存在视为该层为空，属合法状态。
+// validateCustomPricingFiles 要求每个已配置且存在的 fallback/override（以及管理页写入的
+// 全局统一价）文件可读且为 JSON 对象，任一不满足即返回带路径的错误；文件不存在视为
+// 该层为空，属合法状态。
 func (s *PricingService) validateCustomPricingFiles() error {
-	for _, path := range []string{s.cfg.Pricing.FallbackFile, s.cfg.Pricing.OverrideFile} {
+	for _, path := range []string{s.cfg.Pricing.FallbackFile, s.cfg.Pricing.OverrideFile, s.globalPricingFilePath()} {
 		p := strings.TrimSpace(path)
 		if p == "" {
 			continue
@@ -650,6 +656,9 @@ func (s *PricingService) parsePricingData(body []byte) (map[string]*LiteLLMModel
 		return nil, fmt.Errorf("parse raw JSON: %w", err)
 	}
 	rawData = s.applyPricingOverrides(rawData)
+	// 管理页维护的全局统一价优先级最高：压过目录与回退/覆盖文件，但仍由分组/渠道的
+	// 显式定价在后续解析中覆盖。
+	rawData = s.applyGlobalPricingOverrides(rawData)
 
 	result := make(map[string]*LiteLLMModelPricing)
 	skipped := 0
@@ -952,6 +961,166 @@ func (s *PricingService) loadPricingOverrideEntries() map[string]json.RawMessage
 		return nil
 	}
 	return entries
+}
+
+// globalPricingFilePath 返回管理页维护的「全局模型统一价」文件路径。该文件位于持久化的
+// 价格数据目录内（pricing.data_dir），按模型名键存放完整价格条目，是优先级最高的定价层：
+// 压过内置目录与回退文件，但仍让位于分组/渠道的显式定价。
+func (s *PricingService) globalPricingFilePath() string {
+	if s == nil || s.cfg == nil {
+		return ""
+	}
+	dataDir := strings.TrimSpace(s.cfg.Pricing.DataDir)
+	if dataDir == "" {
+		// 未配置持久化目录时不启用该层，避免相对路径被误判为"已配置的叠加文件"。
+		return ""
+	}
+	return filepath.Join(dataDir, "global_model_prices.json")
+}
+
+// loadGlobalPricingEntries 读取全局统一价文件的原始条目。文件不存在或解析失败时返回 nil
+// （视作该层为空），不影响目录加载。
+func (s *PricingService) loadGlobalPricingEntries() map[string]json.RawMessage {
+	path := s.globalPricingFilePath()
+	if path == "" {
+		return nil
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			logger.LegacyPrintf("service.pricing", "[Pricing] Warning: global pricing load skipped: %v", err)
+		}
+		return nil
+	}
+	var entries map[string]json.RawMessage
+	if err := json.Unmarshal(body, &entries); err != nil {
+		logger.LegacyPrintf("service.pricing", "[Pricing] Warning: global pricing load skipped: %v", err)
+		return nil
+	}
+	return entries
+}
+
+// applyGlobalPricingOverrides 把管理页维护的全局统一价逐字段修补进原始目录数据；目录中不
+// 存在的模型直接整体注入（全局价条目自带完整价格，且优先级最高，不走 mergeOverrideOnlyModels
+// 的"目录/回退都缺才并入"延迟逻辑，避免被回退文件的同名条目抢先占位）。
+func (s *PricingService) applyGlobalPricingOverrides(rawData map[string]json.RawMessage) map[string]json.RawMessage {
+	entries := s.loadGlobalPricingEntries()
+	if len(entries) == 0 {
+		return rawData
+	}
+	if rawData == nil {
+		rawData = make(map[string]json.RawMessage, len(entries))
+	}
+	for name, pricing := range entries {
+		base, ok := rawData[name]
+		if !ok {
+			rawData[name] = pricing
+			continue
+		}
+		merged, valid := mergePricingOverrideEntry(base, pricing)
+		if !valid {
+			logger.LegacyPrintf("service.pricing", "[Pricing] Warning: global pricing entry %q skipped: not a JSON object", name)
+			continue
+		}
+		rawData[name] = merged
+	}
+	return rawData
+}
+
+// GlobalPricingFilePath 暴露全局统一价文件路径（供管理员接口读写）。
+func (s *PricingService) GlobalPricingFilePath() string {
+	return s.globalPricingFilePath()
+}
+
+// GlobalPricingEntries 返回全局统一价的当前条目快照（模型名 -> 原始价格 JSON）。
+func (s *PricingService) GlobalPricingEntries() map[string]json.RawMessage {
+	s.globalPricingMu.Lock()
+	defer s.globalPricingMu.Unlock()
+	return s.loadGlobalPricingEntries()
+}
+
+// SaveGlobalPricingEntry 写入/更新单个模型的全局统一价并热重载。patch 必须是 JSON 对象。
+func (s *PricingService) SaveGlobalPricingEntry(model string, patch json.RawMessage) error {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return fmt.Errorf("model name is required")
+	}
+	var fields map[string]any
+	if err := json.Unmarshal(patch, &fields); err != nil || fields == nil {
+		return fmt.Errorf("pricing entry must be a JSON object")
+	}
+	s.globalPricingMu.Lock()
+	defer s.globalPricingMu.Unlock()
+	entries := s.loadGlobalPricingEntries()
+	if entries == nil {
+		entries = make(map[string]json.RawMessage)
+	}
+	normalized, err := json.Marshal(fields)
+	if err != nil {
+		return err
+	}
+	entries[model] = normalized
+	if err := s.writeGlobalPricingEntries(entries); err != nil {
+		return err
+	}
+	return s.reloadGlobalPricingLayers()
+}
+
+// DeleteGlobalPricingEntry 删除单个模型的全局统一价并热重载。
+func (s *PricingService) DeleteGlobalPricingEntry(model string) error {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return fmt.Errorf("model name is required")
+	}
+	s.globalPricingMu.Lock()
+	defer s.globalPricingMu.Unlock()
+	entries := s.loadGlobalPricingEntries()
+	if _, ok := entries[model]; !ok {
+		return nil
+	}
+	delete(entries, model)
+	if err := s.writeGlobalPricingEntries(entries); err != nil {
+		return err
+	}
+	return s.reloadGlobalPricingLayers()
+}
+
+// ReloadGlobalPricing 供管理员接口在直接改动全局统一价文件后手动重建内存价格表。
+func (s *PricingService) ReloadGlobalPricing() error {
+	s.globalPricingMu.Lock()
+	defer s.globalPricingMu.Unlock()
+	return s.reloadGlobalPricingLayers()
+}
+
+// writeGlobalPricingEntries 原子写入全局统一价文件（临时文件 + rename），目录不存在时创建。
+func (s *PricingService) writeGlobalPricingEntries(entries map[string]json.RawMessage) error {
+	path := s.globalPricingFilePath()
+	if path == "" {
+		return fmt.Errorf("global pricing file path is not configured")
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	body, err := json.MarshalIndent(entries, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, body, 0644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+// reloadGlobalPricingLayers 在全局统一价变更后立即重建内存价格表，使计费路径即时生效。
+func (s *PricingService) reloadGlobalPricingLayers() error {
+	err := s.reloadCustomPricingLayers()
+	if err != nil {
+		logger.LegacyPrintf("service.pricing", "[Pricing] Global pricing reload failed: %v", err)
+		return err
+	}
+	logger.LegacyPrintf("service.pricing", "[Pricing] Global pricing reloaded (%d models total)", len(s.pricingData))
+	return nil
 }
 
 // mergePricingOverrideEntry 在 JSON 字段层浅合并：patch 字段覆盖 base 同名字段，

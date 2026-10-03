@@ -115,6 +115,9 @@ func RegisterAdminRoutes(
 		// 渠道管理
 		registerChannelRoutes(admin, h)
 
+		// 全局模型统一价管理
+		registerModelPricingRoutes(admin, h)
+
 		// 渠道监控
 		registerChannelMonitorRoutes(admin, h, settingService)
 		registerChannelMonitorV2Routes(admin, h, settingService)
@@ -786,6 +789,17 @@ func registerChannelRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		channels.POST("", h.Admin.Channel.Create)
 		channels.PUT("/:id", h.Admin.Channel.Update)
 		channels.DELETE("/:id", h.Admin.Channel.Delete)
+	}
+}
+
+// registerModelPricingRoutes 注册全局模型统一价管理接口（UI 维护的最高优先定价层）。
+func registerModelPricingRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	global := admin.Group("/model-pricing/global")
+	{
+		global.GET("", h.Admin.Channel.ListGlobalPricing)
+		global.PUT("", h.Admin.Channel.SaveGlobalPricing)
+		global.DELETE("", h.Admin.Channel.DeleteGlobalPricing)
+		global.POST("/reload", h.Admin.Channel.ReloadGlobalPricing)
 	}
 }
 

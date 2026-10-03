@@ -491,6 +491,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/model-pricing',
+    name: 'AdminGlobalPricing',
+    component: () => import('@/views/admin/GlobalPricingView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Global Model Pricing',
+      titleKey: 'admin.globalPricing.title',
+      descriptionKey: 'admin.globalPricing.description'
+    }
+  },
+  {
     path: '/monitor',
     name: 'ChannelStatus',
     component: () => import('@/views/user/ChannelStatusView.vue'),
