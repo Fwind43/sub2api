@@ -1,7 +1,6 @@
 package commandcode
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -11,35 +10,22 @@ import (
 	"time"
 )
 
-// observingDoer preserves upstream status/headers before committing a stream.
-// No account credentials or mutable state are shared between calls.
-type observingDoer struct {
-	inner HTTPDoer
-	ready chan *http.Response
-	once  sync.Once
+// responseRelay delivers the terminal upstream response to the caller waiting
+// in ChatCompletion. It is published by generate, so intermediate responses
+// (for example a rejected model route that is repaired and retried) are never
+// mistaken for the final outcome and can no longer abort an in-flight repair.
+type responseRelay struct {
+	once sync.Once
+	ch   chan *http.Response
 }
 
-func (d *observingDoer) Do(req *http.Request) (*http.Response, error) {
-	resp, err := d.inner.Do(req)
-	if err != nil {
-		d.once.Do(func() { d.ready <- nil })
-		return nil, err
+// send publishes resp exactly once. A nil relay (direct Generate callers that
+// do not stream through ChatCompletion) makes this a no-op.
+func (r *responseRelay) send(resp *http.Response) {
+	if r == nil {
+		return
 	}
-	if resp.StatusCode != http.StatusOK {
-		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-		resp.Body.Close()
-		if readErr != nil {
-			d.once.Do(func() { d.ready <- nil })
-			return nil, readErr
-		}
-		snapshot := *resp
-		snapshot.Body = io.NopCloser(bytes.NewReader(body))
-		resp.Body = io.NopCloser(bytes.NewReader(body))
-		d.once.Do(func() { d.ready <- &snapshot })
-	} else {
-		d.once.Do(func() { d.ready <- resp })
-	}
-	return resp, nil
+	r.once.Do(func() { r.ch <- resp })
 }
 
 func openAIUsage(raw map[string]any) map[string]any {
@@ -76,9 +62,9 @@ func (c *Client) ChatCompletion(ctx context.Context, key string, body []byte, st
 		return nil, fmt.Errorf("CommandCode HTTP client is required")
 	}
 	ctx, cancel := context.WithCancel(ctx)
-	observer := &observingDoer{inner: c.HTTPClient, ready: make(chan *http.Response, 1)}
+	relay := &responseRelay{ch: make(chan *http.Response, 1)}
 	client := *c
-	client.HTTPClient = observer
+	client.relay = relay
 	reader, writer := io.Pipe()
 	done := make(chan error, 1)
 	id := fmt.Sprintf("chatcmpl-cc-%d", time.Now().UnixNano())
@@ -104,7 +90,9 @@ func (c *Client) ChatCompletion(ctx context.Context, key string, body []byte, st
 			req.OnToolCall = func(call map[string]any) error { return emit(map[string]any{"tool_calls": []any{call}}, nil, nil) }
 		}
 		result, err := client.Generate(ctx, key, req.Model, req, onDelta)
-		observer.once.Do(func() { observer.ready <- nil })
+		// Release the waiter if generate returned before the upstream call
+		// (validation errors, cancellation). No-op once a response was relayed.
+		relay.send(nil)
 		if err == nil {
 			finish := result.FinishReason
 			if finish == "" {
@@ -131,7 +119,7 @@ func (c *Client) ChatCompletion(ctx context.Context, key string, body []byte, st
 		done <- err
 	}()
 	select {
-	case upstream := <-observer.ready:
+	case upstream := <-relay.ch:
 		if upstream == nil {
 			reader.Close()
 			cancel()

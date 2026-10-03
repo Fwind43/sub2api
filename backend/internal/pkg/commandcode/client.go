@@ -22,6 +22,10 @@ type Client struct {
 	HTTPClient HTTPDoer
 	UserAgent  string
 	Version    string
+	// relay, when set by ChatCompletion, receives the terminal upstream
+	// response exactly once. generate publishes it only after model-route
+	// repair has been resolved, so an intermediate 403 can never abort a repair.
+	relay *responseRelay
 }
 
 type Request struct {
@@ -197,6 +201,7 @@ func (c *Client) generate(ctx context.Context, apiKey, model string, payload Req
 	}
 	response, errDo := c.HTTPClient.Do(request)
 	if errDo != nil {
+		c.relay.send(nil)
 		return Result{}, errDo
 	}
 	defer response.Body.Close()
@@ -209,8 +214,16 @@ func (c *Client) generate(ctx context.Context, apiKey, model string, payload Req
 				return c.generate(ctx, apiKey, resolved, payload, onDelta, false)
 			}
 		}
+		// Terminal upstream error: relay the exact status/headers/body so
+		// ChatCompletion can preserve the caller-visible error contract.
+		snapshot := *response
+		snapshot.Body = io.NopCloser(bytes.NewReader(detail))
+		c.relay.send(&snapshot)
 		return Result{}, fmt.Errorf("upstream status %d: %s", response.StatusCode, truncate(string(detail), 400))
 	}
+	// A 200 is terminal: relay before draining the body so ChatCompletion can
+	// begin delivering chunks while generate continues to stream them.
+	c.relay.send(response)
 	result := Result{}
 	finished := false
 	scanner := bufio.NewScanner(response.Body)
