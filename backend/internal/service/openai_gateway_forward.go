@@ -10,36 +10,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 )
-
-func accountUsesPrismBrowser(account *Account, cfg *config.Config) bool {
-	return accountHasPrismBrowser(account) && cfg != nil && cfg.Gateway.PrismBrowser.Enabled
-}
-
-func accountHasPrismBrowser(account *Account) bool {
-	if account == nil || account.Platform != PlatformOpenAI || account.Type != AccountTypeOAuth || account.IsShadow() {
-		return false
-	}
-	enabled, _ := account.Extra["openai_prism_browser"].(bool)
-	return enabled
-}
-
-func prismBrowserResponsesURL(baseURL string) string {
-	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
-	if base == "" {
-		return ""
-	}
-	if strings.HasSuffix(base, "/responses") {
-		return base
-	}
-	return base + "/responses"
-}
 
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
@@ -80,11 +56,6 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			},
 		})
 		return nil, errors.New("codex_cli_only restriction: only codex official clients are allowed")
-	}
-
-	modelForBPS := gjson.GetBytes(body, "model").String()
-	if account.IsPrismBrowserEnabledForModel(modelForBPS) {
-		return s.forwardPrismBrowser(ctx, c, account, body, startTime)
 	}
 
 	normalizedBody, normalized, err := normalizeOpenAICodexCompactReasoningEffortForAccount(c, account, body)
