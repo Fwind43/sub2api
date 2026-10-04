@@ -31,7 +31,7 @@ func newGlobalPricingService(t *testing.T, overrideJSON string) *PricingService 
 	return svc
 }
 
-func mustJSON(t *testing.T, body string) json.RawMessage {
+func mustPricingRawJSON(t *testing.T, body string) json.RawMessage {
 	t.Helper()
 	require.True(t, json.Valid([]byte(body)), "test fixture must be valid JSON: %s", body)
 	return json.RawMessage(body)
@@ -45,7 +45,7 @@ func TestGlobalPricingEntryOverridesCatalogAndOverrideFile(t *testing.T) {
 	require.InDelta(t, 5e-6, svc.pricingData["gpt-5.4"].InputCostPerToken, 1e-12,
 		"fallback/override file alone sets 5e-6 before the global layer is added")
 
-	require.NoError(t, svc.SaveGlobalPricingEntry("gpt-5.4", mustJSON(t, `{
+	require.NoError(t, svc.SaveGlobalPricingEntry("gpt-5.4", mustPricingRawJSON(t, `{
 		"litellm_provider": "openai", "mode": "chat",
 		"input_cost_per_token": 3e-06, "output_cost_per_token": 4e-06
 	}`)))
@@ -70,7 +70,7 @@ func TestGlobalPricingEntryInjectsModelAbsentFromCatalog(t *testing.T) {
 	require.NoError(t, svc.loadPricingData(svc.getPricingFilePath()))
 	require.NotContains(t, svc.pricingData, "global-only")
 
-	require.NoError(t, svc.SaveGlobalPricingEntry("global-only", mustJSON(t, `{
+	require.NoError(t, svc.SaveGlobalPricingEntry("global-only", mustPricingRawJSON(t, `{
 		"litellm_provider": "commandcode", "mode": "chat",
 		"input_cost_per_token": 1e-06, "output_cost_per_token": 2e-06
 	}`)))
@@ -85,7 +85,7 @@ func TestGlobalPricingEntryInjectsModelAbsentFromCatalog(t *testing.T) {
 func TestDeleteGlobalPricingEntryRestoresCatalogValue(t *testing.T) {
 	svc := newGlobalPricingService(t, "")
 	require.NoError(t, svc.loadPricingData(svc.getPricingFilePath()))
-	require.NoError(t, svc.SaveGlobalPricingEntry("gpt-5.4", mustJSON(t, `{"input_cost_per_token": 9e-06}`)))
+	require.NoError(t, svc.SaveGlobalPricingEntry("gpt-5.4", mustPricingRawJSON(t, `{"input_cost_per_token": 9e-06}`)))
 	require.InDelta(t, 9e-6, svc.pricingData["gpt-5.4"].InputCostPerToken, 1e-12)
 
 	require.NoError(t, svc.DeleteGlobalPricingEntry("gpt-5.4"))
@@ -100,7 +100,7 @@ func TestDeleteGlobalPricingEntryRestoresCatalogValue(t *testing.T) {
 func TestGlobalPricingEntryPersistsAndReloads(t *testing.T) {
 	svc := newGlobalPricingService(t, "")
 	require.NoError(t, svc.loadPricingData(svc.getPricingFilePath()))
-	require.NoError(t, svc.SaveGlobalPricingEntry("gpt-5.4", mustJSON(t, `{"input_cost_per_token": 7e-06}`)))
+	require.NoError(t, svc.SaveGlobalPricingEntry("gpt-5.4", mustPricingRawJSON(t, `{"input_cost_per_token": 7e-06}`)))
 
 	require.Equal(t, filepath.Join(svc.cfg.Pricing.DataDir, "global_model_prices.json"), svc.GlobalPricingFilePath())
 	raw, err := os.ReadFile(svc.GlobalPricingFilePath())
@@ -117,8 +117,8 @@ func TestGlobalPricingEntryRejectsInvalidInput(t *testing.T) {
 	svc := newGlobalPricingService(t, "")
 	require.NoError(t, svc.loadPricingData(svc.getPricingFilePath()))
 
-	require.Error(t, svc.SaveGlobalPricingEntry("   ", mustJSON(t, `{}`)))
-	require.Error(t, svc.SaveGlobalPricingEntry("gpt-5.4", mustJSON(t, `[1,2]`)))
+	require.Error(t, svc.SaveGlobalPricingEntry("   ", mustPricingRawJSON(t, `{}`)))
+	require.Error(t, svc.SaveGlobalPricingEntry("gpt-5.4", mustPricingRawJSON(t, `[1,2]`)))
 	require.Error(t, svc.SaveGlobalPricingEntry("gpt-5.4", json.RawMessage(`not-json`)))
 	require.Empty(t, svc.GlobalPricingEntries())
 	_, statErr := os.Stat(svc.GlobalPricingFilePath())
