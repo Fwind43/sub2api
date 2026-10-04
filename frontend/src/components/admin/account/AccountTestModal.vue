@@ -774,10 +774,14 @@ const loadAvailableModels = async () => {
     if (availableModels.value.length > 0) {
       if (props.account.platform === 'gemini') {
         selectedModelId.value = availableModels.value[0].id
-      } else {
-        // Try to select Sonnet as default, otherwise use first model
+      } else if (props.account.platform === 'anthropic') {
+        // Claude accounts: try to select Sonnet as default, otherwise first model
         const sonnetModel = availableModels.value.find((m) => m.id.includes('sonnet'))
         selectedModelId.value = sonnetModel?.id || availableModels.value[0].id
+      } else {
+        // Every other platform exposes a catalog whose first entry is the
+        // intended default (e.g. clinepass returns subscription models first).
+        selectedModelId.value = availableModels.value[0].id
       }
     }
   } catch (error) {

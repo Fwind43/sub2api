@@ -3022,7 +3022,7 @@ func (h *AccountHandler) GetAvailableModels(c *gin.Context) {
 			}
 			return
 		}
-		sort.Strings(ids)
+		sortClinePassModelIDs(ids)
 		models := make([]claude.Model, 0, len(ids))
 		for _, id := range ids {
 			models = append(models, claude.Model{ID: id, DisplayName: id})
