@@ -51,7 +51,8 @@ const (
 	PlatformTypeSafe   = domain.PlatformTypeSafe
 	PlatformOpenCodeGo = domain.PlatformOpenCodeGo
 	PlatformCommandCode = domain.PlatformCommandCode
-	PlatformComposite  = domain.PlatformComposite
+	PlatformClinePass   = domain.PlatformClinePass
+	PlatformComposite   = domain.PlatformComposite
 	// PlatformKiro is retained for unsupported-platform threshold tests and legacy
 	// account rows. Scheduling-threshold evaluation never pauses kiro accounts.
 	PlatformKiro = "kiro"
@@ -115,6 +116,12 @@ func IsCNProvider(platform string) bool {
 // IsOpenCodeGo 报告 platform 是否为 OpenCode Go 订阅网关。
 func IsOpenCodeGo(platform string) bool {
 	return platform == PlatformOpenCodeGo
+}
+
+// IsClinePass 报告 platform 是否为 ClinePass（cline.bot）网关。
+// ClinePass 上游为 OpenAI 兼容的 Chat Completions 端点，且只支持流式生成。
+func IsClinePass(platform string) bool {
+	return platform == PlatformClinePass
 }
 
 // IsMultiProtocolAPIKeyProvider 报告 platform 是否为多协议 API Key 网关

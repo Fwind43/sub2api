@@ -23,6 +23,27 @@ export default {
         "download": "\u4e0b\u8f7d\u672c\u673a\u63a5\u6536\u5668\uff08\u9700\u8981 Node.js 20+\uff09",
         "localCommand": "\u5728\u5f53\u524d\u6d4f\u89c8\u5668\u6240\u5728\u7535\u8111\uff08\u4e0d\u662f\u8fdc\u7a0b\u670d\u52a1\u5668\uff09\u7684\u4e0b\u8f7d\u76ee\u5f55\u6253\u5f00\u7ec8\u7aef\uff0c\u6267\u884c\uff1a"
       },
+      clinePassAuth: {
+        title: "ClinePass 登录授权",
+        description: "通过设备码流程使用 Cline 账号登录，凭据保存到该账号并自动刷新。",
+        start: "开始登录",
+        starting: "正在启动...",
+        instructions: "打开验证页面并确认下方设备码，然后创建账号。",
+        openPage: "打开验证页面",
+        waiting: "等待授权中...",
+        approved: "已授权，正在创建账号...",
+        creating: "创建中...",
+        checkAndCreate: "检查状态并创建账号",
+        errors: {
+          start: "无法启动 ClinePass 登录。",
+          create: "无法使用 ClinePass 凭据创建账号。"
+        },
+        gatewayPreset: {
+          label: "接入预设",
+          custom: "默认 / 自定义",
+          hint: "填写兼容网关地址和 API Key，请勿填写 Cline 官网地址或 Cookie。"
+        }
+      },
       gatewayPreset: {
         label: "接入预设",
         custom: "默认 / 自定义",

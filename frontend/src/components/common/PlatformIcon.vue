@@ -61,6 +61,11 @@
     <circle cx="18" cy="18" r="3" />
     <path stroke-linecap="round" stroke-linejoin="round" d="M8.7 10.7 15.3 7.3M8.7 13.3l6.6 3.4" />
   </svg>
+  <!-- ClinePass (terminal/agent icon) -->
+  <svg v-else-if="platform === 'clinepass'" :class="sizeClass" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <path stroke-linecap="round" stroke-linejoin="round" d="M7 9.5 10 12l-3 2.5M12.5 15H17" />
+  </svg>
   <!-- Fallback: generic platform icon -->
   <svg v-else :class="sizeClass" fill="currentColor" viewBox="0 0 24 24">
     <path

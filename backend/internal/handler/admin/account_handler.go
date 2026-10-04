@@ -2999,6 +2999,38 @@ func (h *AccountHandler) GetAvailableModels(c *gin.Context) {
 		return
 	}
 
+	// ClinePass accounts expose the upstream recommended-model catalog.
+	if account.IsClinePass() {
+		if h.accountTestService == nil {
+			response.InternalError(c, "Account test service is not configured")
+			return
+		}
+		ids, err := h.accountTestService.FetchUpstreamSupportedModels(c.Request.Context(), account)
+		if err != nil {
+			var syncErr *service.UpstreamModelSyncError
+			if errors.As(err, &syncErr) {
+				switch syncErr.Kind {
+				case service.UpstreamModelSyncErrorConfiguration, service.UpstreamModelSyncErrorUnsupported:
+					response.BadRequest(c, syncErr.SafeMessage())
+				case service.UpstreamModelSyncErrorInternal:
+					response.InternalError(c, syncErr.SafeMessage())
+				default:
+					response.Error(c, http.StatusBadGateway, syncErr.SafeMessage())
+				}
+			} else {
+				response.Error(c, http.StatusBadGateway, "Failed to fetch ClinePass models")
+			}
+			return
+		}
+		sort.Strings(ids)
+		models := make([]claude.Model, 0, len(ids))
+		for _, id := range ids {
+			models = append(models, claude.Model{ID: id, DisplayName: id})
+		}
+		response.Success(c, models)
+		return
+	}
+
 	// Handle Claude/Anthropic accounts
 	// For OAuth and Setup-Token accounts: return default models
 	if account.IsOAuth() {

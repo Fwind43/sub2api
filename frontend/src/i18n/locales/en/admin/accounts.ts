@@ -23,6 +23,27 @@ export default {
         "download": "Download local receiver (Node.js 20+)",
         "localCommand": "On this browser computer (not the remote server), open a terminal in the download folder and run:"
       },
+      clinePassAuth: {
+        title: "ClinePass sign-in",
+        description: "Sign in with your Cline account via the device-code flow. The credential is stored on this account and refreshed automatically.",
+        start: "Start sign-in",
+        starting: "Starting...",
+        instructions: "Open the verification page and confirm the code below, then create the account.",
+        openPage: "Open verification page",
+        waiting: "Waiting for authorization...",
+        approved: "Authorized. Creating account...",
+        creating: "Creating...",
+        checkAndCreate: "Check status and create account",
+        errors: {
+          start: "Unable to start the ClinePass sign-in.",
+          create: "Unable to create the account from the ClinePass credential."
+        },
+        gatewayPreset: {
+          label: "Connection preset",
+          custom: "Default / Custom",
+          hint: "Enter the compatible gateway URL and API key, not the Cline website URL or a cookie."
+        }
+      },
       gatewayPreset: {
         label: "Connection preset",
         custom: "Default / Custom",

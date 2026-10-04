@@ -303,7 +303,12 @@ func (a *Account) IsCNProvider() bool {
 // openai/grok 原生走 OpenAI 网关；国产供应商同为 OpenAI Chat Completions
 // 兼容上游，也经 OpenAI 网关转发。OpenCode 同样经 OpenAI 网关按模型分流。
 func (a *Account) IsOpenAICompatible() bool {
-	return a != nil && (a.Platform == PlatformOpenAI || a.Platform == PlatformGrok || a.Platform == PlatformCommandCode || a.IsCNProvider() || a.IsOpenCodeGo())
+	return a != nil && (a.Platform == PlatformOpenAI || a.Platform == PlatformGrok || a.Platform == PlatformCommandCode || a.Platform == PlatformClinePass || a.IsCNProvider() || a.IsOpenCodeGo())
+}
+
+// IsClinePass 报告账号是否为 ClinePass（cline.bot）账号。
+func (a *Account) IsClinePass() bool {
+	return a != nil && a.Platform == PlatformClinePass
 }
 
 func (a *Account) GeminiOAuthType() string {
@@ -1387,6 +1392,9 @@ func (a *Account) GetOpenAIBaseURL() string {
 	if a != nil && a.Platform == PlatformCommandCode {
 		return "https://api.commandcode.ai"
 	}
+	if a != nil && a.Platform == PlatformClinePass {
+		return a.ClinePassBaseURL()
+	}
 	if !a.IsOpenAI() && !a.IsCNProvider() && !a.IsOpenCodeGo() {
 		return ""
 	}
@@ -1792,6 +1800,10 @@ func (a *Account) GetOpenAIApiKey() string {
 func (a *Account) GetOpenAIProtocolAPIKey() string {
 	if a != nil && a.Platform == PlatformCommandCode && a.Type == AccountTypeAPIKey {
 		return a.GetCredential("api_key")
+	}
+	if a != nil && a.Platform == PlatformClinePass {
+		credential, _ := a.ClinePassCredential()
+		return credential
 	}
 	if a == nil {
 		return ""

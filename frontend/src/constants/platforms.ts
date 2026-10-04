@@ -22,6 +22,7 @@ export const CONCRETE_PLATFORM_OPTIONS = [
   { value: 'minimax', label: 'MiniMax' },
   { value: 'opencode_go', label: 'OpenCode' },
   { value: 'commandcode', label: 'CommandCode' },
+  { value: 'clinepass', label: 'ClinePass' },
   { value: 'typesafe', label: 'TypeSafe / Jev' }
 ] as const satisfies readonly PlatformOption<AccountPlatform>[]
 

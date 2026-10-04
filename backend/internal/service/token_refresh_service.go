@@ -98,6 +98,44 @@ func NewTokenRefreshService(
 	tempUnschedCache TempUnschedCache,
 	grokOAuthServices ...*GrokOAuthService,
 ) *TokenRefreshService {
+	return newTokenRefreshService(accountRepo, oauthService, openaiOAuthService, geminiOAuthService, antigravityOAuthService, cacheInvalidator, schedulerCache, cfg, tempUnschedCache, grokOAuthServices, nil)
+}
+
+// NewTokenRefreshServiceWithClinePass wires the ClinePass OAuth refresher in
+// addition to the default platform refreshers.
+func NewTokenRefreshServiceWithClinePass(
+	accountRepo AccountRepository,
+	oauthService *OAuthService,
+	openaiOAuthService *OpenAIOAuthService,
+	geminiOAuthService *GeminiOAuthService,
+	antigravityOAuthService *AntigravityOAuthService,
+	cacheInvalidator TokenCacheInvalidator,
+	schedulerCache SchedulerCache,
+	cfg *config.Config,
+	tempUnschedCache TempUnschedCache,
+	grokOAuthService *GrokOAuthService,
+	clinePassOAuthService *ClinePassOAuthService,
+) *TokenRefreshService {
+	var grok []*GrokOAuthService
+	if grokOAuthService != nil {
+		grok = append(grok, grokOAuthService)
+	}
+	return newTokenRefreshService(accountRepo, oauthService, openaiOAuthService, geminiOAuthService, antigravityOAuthService, cacheInvalidator, schedulerCache, cfg, tempUnschedCache, grok, clinePassOAuthService)
+}
+
+func newTokenRefreshService(
+	accountRepo AccountRepository,
+	oauthService *OAuthService,
+	openaiOAuthService *OpenAIOAuthService,
+	geminiOAuthService *GeminiOAuthService,
+	antigravityOAuthService *AntigravityOAuthService,
+	cacheInvalidator TokenCacheInvalidator,
+	schedulerCache SchedulerCache,
+	cfg *config.Config,
+	tempUnschedCache TempUnschedCache,
+	grokOAuthServices []*GrokOAuthService,
+	clinePassOAuthService *ClinePassOAuthService,
+) *TokenRefreshService {
 	refreshCfg := &config.TokenRefreshConfig{}
 	if cfg != nil {
 		refreshCfg = &cfg.TokenRefresh
@@ -129,15 +167,23 @@ func NewTokenRefreshService(
 	}
 	grokRefresher := NewGrokTokenRefresher(grokOAuthService)
 
-	// Each provider is registered exactly once. The same registry supplies both
-	// execution and repository eligibility, preventing future platform drift.
-	s.registrations = []tokenRefreshRegistration{
+	registrations := []tokenRefreshRegistration{
 		{platform: PlatformAnthropic, refresher: claudeRefresher, executor: claudeRefresher},
 		{platform: PlatformOpenAI, refresher: openAIRefresher, executor: openAIRefresher},
 		{platform: PlatformGemini, refresher: geminiRefresher, executor: geminiRefresher},
 		{platform: PlatformAntigravity, refresher: agRefresher, executor: agRefresher},
 		{platform: PlatformGrok, refresher: grokRefresher, executor: grokRefresher},
 	}
+	if clinePassOAuthService != nil {
+		clinePassRefresher := NewClinePassTokenRefresher(clinePassOAuthService)
+		registrations = append(registrations, tokenRefreshRegistration{
+			platform: PlatformClinePass, refresher: clinePassRefresher, executor: clinePassRefresher,
+		})
+	}
+
+	// Each provider is registered exactly once. The same registry supplies both
+	// execution and repository eligibility, preventing future platform drift.
+	s.registrations = registrations
 
 	return s
 }

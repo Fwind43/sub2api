@@ -15,6 +15,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/clinepass"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/geminicli"
 )
 
@@ -775,6 +776,9 @@ func (s *AccountTestService) fetchUpstreamModelList(ctx context.Context, account
 	if account.IsGrok() {
 		extractModels = extractGrokUpstreamModelIDs
 	}
+	if account.IsClinePass() {
+		extractModels = extractClinePassUpstreamModelIDs
+	}
 	models, err := extractModels(body)
 	if err != nil {
 		return nil, nil, newUpstreamModelSyncUpstreamError("Upstream model list response was not valid JSON", err)
@@ -794,6 +798,8 @@ func (s *AccountTestService) buildUpstreamModelsRequest(ctx context.Context, acc
 		return s.buildAntigravityAPIKeyModelsRequest(ctx, account)
 	case account.IsGrok():
 		return s.buildGrokUpstreamModelsRequest(ctx, account)
+	case account.IsClinePass():
+		return s.buildClinePassUpstreamModelsRequest(ctx, account)
 	case account.IsOpenAI() || account.IsCNProvider() || account.IsOpenCodeGo():
 		// 国产 OpenAI 兼容供应商（kimi/zhipu/deepseek）与 OpenCode Go
 		// 复用 OpenAI /v1/models 探测。
@@ -832,6 +838,34 @@ func (s *AccountTestService) buildCommandCodeUpstreamModelsRequest(ctx context.C
 	req.Header.Set("User-Agent", "command-code-cli/1.54.1")
 	req.Header.Set("x-command-code-version", "1.54.1")
 	req.Header.Set("x-cli-environment", "production")
+	return req, nil
+}
+
+// buildClinePassUpstreamModelsRequest queries the Cline recommended-model
+// catalog. ClinePass is OAuth-only and the catalog is served from the same
+// origin as inference, so the account token is only ever sent to that origin.
+func (s *AccountTestService) buildClinePassUpstreamModelsRequest(ctx context.Context, account *Account) (*http.Request, error) {
+	if account == nil {
+		return nil, newUpstreamModelSyncConfigError("Account is required", nil)
+	}
+	accessToken := strings.TrimSpace(account.GetClinePassAccessToken())
+	if accessToken == "" {
+		return nil, newUpstreamModelSyncConfigError("No ClinePass access token is available", nil)
+	}
+	baseURL := account.ClinePassBaseURL()
+	if strings.TrimSpace(baseURL) == "" {
+		baseURL = clinepass.DefaultBaseURL
+	}
+	target := strings.TrimRight(strings.TrimSpace(baseURL), "/") + "/ai/cline/recommended-models"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	if err != nil {
+		return nil, newUpstreamModelSyncConfigError("Invalid ClinePass model list URL", err)
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", "Bearer "+clinepass.NormalizeAccessToken(accessToken))
+	req.Header.Set("HTTP-Referer", clinepass.Referer)
+	req.Header.Set("X-Title", clinepass.Title)
+	account.ApplyHeaderOverrides(req.Header)
 	return req, nil
 }
 
@@ -1295,6 +1329,35 @@ type upstreamModelCapabilityEntry struct {
 
 func extractUpstreamModelIDs(body []byte) ([]string, error) {
 	return extractUpstreamModelIDsWithSelector(body, upstreamModelEntryID)
+}
+
+func extractClinePassUpstreamModelIDs(body []byte) ([]string, error) {
+	var node any
+	if err := json.Unmarshal(body, &node); err != nil {
+		return nil, fmt.Errorf("parse clinepass model list: %w", err)
+	}
+	var ids []string
+	collectClinePassModelIDs(node, &ids)
+	return dedupeAndSortModelIDs(ids), nil
+}
+
+// collectClinePassModelIDs walks the Cline recommended-model payload, which may
+// be a flat array, an object with data/models keys, or provider-grouped maps.
+func collectClinePassModelIDs(node any, out *[]string) {
+	switch v := node.(type) {
+	case []any:
+		for _, item := range v {
+			collectClinePassModelIDs(item, out)
+		}
+	case map[string]any:
+		if id, ok := v["id"].(string); ok && strings.TrimSpace(id) != "" {
+			*out = append(*out, strings.TrimSpace(id))
+			return
+		}
+		for _, item := range v {
+			collectClinePassModelIDs(item, out)
+		}
+	}
 }
 
 func extractGrokUpstreamModelIDs(body []byte) ([]string, error) {

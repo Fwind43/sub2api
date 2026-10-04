@@ -61,6 +61,9 @@ func RegisterAdminRoutes(
 		// Grok OAuth
 		registerGrokOAuthRoutes(admin, h)
 
+		// ClinePass OAuth
+		registerClinePassOAuthRoutes(admin, h)
+
 		// 国产供应商（kimi/zhipu/deepseek）额度与余额
 		registerCNProviderRoutes(admin, h)
 
@@ -485,6 +488,19 @@ func registerAntigravityOAuthRoutes(admin *gin.RouterGroup, h *handler.Handlers)
 		antigravity.POST("/oauth/auth-url", h.Admin.AntigravityOAuth.GenerateAuthURL)
 		antigravity.POST("/oauth/exchange-code", h.Admin.AntigravityOAuth.ExchangeCode)
 		antigravity.POST("/oauth/refresh-token", h.Admin.AntigravityOAuth.RefreshToken)
+	}
+}
+
+func registerClinePassOAuthRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	clinepass := admin.Group("/clinepass")
+	{
+		clinepass.GET("/oauth/capabilities", h.Admin.ClinePassOAuth.GetCapabilities)
+		clinepass.POST("/oauth/device/start", h.Admin.ClinePassOAuth.StartDeviceAuth)
+		clinepass.POST("/oauth/device/poll", h.Admin.ClinePassOAuth.PollDeviceAuth)
+		clinepass.POST("/oauth/device/create", h.Admin.ClinePassOAuth.CreateAccountFromDevice)
+		clinepass.POST("/oauth/refresh-token", h.Admin.ClinePassOAuth.RefreshToken)
+		clinepass.POST("/oauth/models", h.Admin.ClinePassOAuth.ListModels)
+		clinepass.POST("/accounts/:id/refresh", h.Admin.ClinePassOAuth.RefreshAccountToken)
 	}
 }
 

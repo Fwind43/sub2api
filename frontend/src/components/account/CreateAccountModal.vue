@@ -253,6 +253,19 @@
             <PlatformIcon platform="typesafe" size="sm" />
             TypeSafe / Jev
           </button>
+          <button
+            type="button"
+            @click="selectClinePassPlatform()"
+            :class="[
+              'flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2.5 text-sm font-medium transition-all',
+              form.platform === 'clinepass'
+                ? 'bg-white text-fuchsia-700 shadow-sm dark:bg-dark-600 dark:text-fuchsia-300'
+                : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
+            ]"
+          >
+            <PlatformIcon platform="clinepass" size="sm" />
+            ClinePass
+          </button>
         </div>
       </div>
 
@@ -3581,7 +3594,16 @@
 
     <!-- Step 2: OAuth Authorization -->
     <div v-else class="space-y-5">
+      <ClinePassAuthorization
+        v-if="form.platform === 'clinepass'"
+        :name="form.name"
+        :proxy-id="form.proxy_id"
+        :concurrency="form.concurrency"
+        :group-ids="form.group_ids"
+        @created="onClinePassCreated"
+      />
       <OAuthAuthorizationFlow
+        v-else
         ref="oauthFlowRef"
         :add-method="form.platform === 'anthropic' ? addMethod : 'oauth'"
         :auth-url="currentAuthUrl"
@@ -3934,6 +3956,7 @@
 import { ref, reactive, computed, watch, nextTick } from 'vue'
 import { normalizeCommandCodeBaseUrl } from '@/utils/commandcode'
 import CommandCodeAuthorization from './CommandCodeAuthorization.vue'
+import ClinePassAuthorization from './ClinePassAuthorization.vue'
 import type { CommandCodeAuthorizationResult } from '@/utils/commandcodeAuthorization'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -4212,6 +4235,11 @@ function onCommandCodeAuthorized(result: CommandCodeAuthorizationResult) {
   apiKeyValue.value = result.apiKey
   commandCodeAuthorization.value = result
 }
+function onClinePassCreated() {
+  appStore.showSuccess(t('admin.accounts.accountCreated'))
+  emit('created')
+  handleClose()
+}
 
 const upstreamBillingAutoProbeEnabled = ref(true)
 
@@ -4347,6 +4375,12 @@ function selectTypeSafePlatform() {
   accountCategory.value = 'apikey'
   apiKeyBaseUrl.value = 'https://api.typesafe.ai'
   allowedModels.value = ['jev-latest']
+}
+function selectClinePassPlatform() {
+  form.platform = 'clinepass'
+  form.type = 'oauth'
+  accountCategory.value = 'oauth-based'
+  apiKeyBaseUrl.value = 'https://api.cline.bot/api/v1'
 }
 // 账号类型 / 协议变更时同步默认 base url。
 watch(openCodeAccountMode, (mode, previousMode) => {
@@ -4956,7 +4990,9 @@ watch(
               ? 'https://api.x.ai/v1'
               : newPlatform === 'typesafe'
                 ? 'https://api.typesafe.ai'
-              : 'https://api.anthropic.com'
+                : newPlatform === 'clinepass'
+                  ? 'https://api.cline.bot/api/v1'
+                  : 'https://api.anthropic.com'
     }
     // Clear model-related settings
     allowedModels.value = []

@@ -18,6 +18,7 @@ const PROVIDER_BY_PLATFORM: Record<GroupPlatform, KeyGroupProvider> = {
   composite: 'other',
   opencode_go: 'other',
   commandcode: 'other',
+  clinepass: 'other',
   typesafe: 'other'
 }
 

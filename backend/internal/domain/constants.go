@@ -34,7 +34,10 @@ const (
 	PlatformOpenCodeGo = "opencode_go"
 	// PlatformCommandCode identifies independently authenticated CommandCode accounts.
 	PlatformCommandCode = "commandcode"
-	PlatformComposite  = "composite"
+	// PlatformClinePass identifies ClinePass (cline.bot) accounts. Both OAuth
+	// (WorkOS device flow) and API-key credentials are accepted.
+	PlatformClinePass = "clinepass"
+	PlatformComposite = "composite"
 )
 
 // Account mode constants 区分国产供应商的「按量付费（余额）」与「Coding Plan」两种接入方式。

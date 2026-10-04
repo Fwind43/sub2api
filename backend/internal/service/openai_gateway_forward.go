@@ -159,7 +159,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		return s.forwardGrokResponses(ctx, c, account, body, originalModel, reqStream, startTime)
 	}
 
-	if account.Platform == PlatformCommandCode {
+	if account.Platform == PlatformCommandCode || account.Platform == PlatformClinePass {
 		return s.forwardResponsesViaRawChatCompletions(ctx, c, account, body)
 	}
 

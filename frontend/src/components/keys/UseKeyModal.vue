@@ -1336,6 +1336,7 @@ function generateRoutedCodexFiles(
     minimax: 'MiniMax',
     opencode_go: 'OpenCode',
     commandcode: 'CommandCode',
+    clinepass: 'ClinePass',
     typesafe: 'TypeSafe / Jev',
     composite: 'Composite'
   }

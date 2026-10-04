@@ -259,6 +259,11 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 	var forwardErr error
 	if clientStream {
 		result, forwardErr = s.streamRawChatCompletions(c, resp, account, originalModel, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime, len(body))
+	} else if account.Platform == PlatformClinePass {
+		// ClinePass answers with SSE even when the client asked for a
+		// non-streaming response, because the upstream only implements
+		// streaming generation. Aggregate the stream back into one JSON body.
+		result, forwardErr = s.bufferClinePassStream(c, resp, account, originalModel, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime, len(body))
 	} else {
 		result, forwardErr = s.bufferRawChatCompletions(c, resp, account, originalModel, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
 	}
@@ -276,6 +281,12 @@ func (s *OpenAIGatewayService) rawChatCompletionsURL(account *Account) (string, 
 			return "", fmt.Errorf("invalid grok base_url: %w", err)
 		}
 		return targetURL, nil
+	}
+
+	if account.Platform == PlatformClinePass {
+		// ClinePass exposes a versioned OpenAI-compatible root; the target URL
+		// is derived from the account base_url plus /chat/completions.
+		return account.ClinePassChatCompletionsURL(), nil
 	}
 
 	return s.openAIChatCompletionsTargetURL(account)
