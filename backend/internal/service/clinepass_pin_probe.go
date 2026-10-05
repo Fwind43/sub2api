@@ -31,16 +31,32 @@ type ClinePassUpstreamProbeResult struct {
 
 var (
 	clinePassAvailableProvidersRe = regexp.MustCompile(`Available providers are:\s*([^.]+)`)
-	clinePassProviderSlugRe       = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
-	clinePassProbeRawLimit        = int64(64 * 1024)
+	// clinePassProvidersServingRe matches the newer OpenRouter relay wording
+	// "No allowed providers are available for the selected model. Providers
+	// serving z-ai/glm-5.3-flash-20260826: a, b, c, but your request's
+	// provider.only preference permits only: __probe__." (nested in a JSON
+	// string field on current relays).
+	clinePassProvidersServingRe = regexp.MustCompile(`(?s)Providers serving [^:]+:\s*(.+?)(?:,\s*but\b|\n|$)`)
+	clinePassProviderSlugRe     = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+	clinePassProbeRawLimit      = int64(64 * 1024)
 )
 
 // ParseClinePassAvailableProviders extracts provider slugs from a relay error
 // body. It understands both pipelines: the Vercel AI Gateway plain-text
 // "Available providers are: a, b." sentence (which may embed JSON fragments -
-// tokens are slug-filtered) and the OpenRouter JSON shape
-// error.metadata.available_providers (string items or {slug} objects).
+// tokens are slug-filtered), the OpenRouter JSON shape
+// error.metadata.available_providers (string items or {slug} objects), and the
+// newer relay wording "Providers serving <model>: a, b, c, but ...". Relay
+// errors arrive nested several JSON-string layers deep, so string carriers are
+// unwrapped recursively (depth-limited, self-referential values skipped).
 func ParseClinePassAvailableProviders(raw string) []string {
+	return parseClinePassAvailableProviders(raw, 0)
+}
+
+func parseClinePassAvailableProviders(raw string, depth int) []string {
+	if depth > 4 {
+		return nil
+	}
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return nil
@@ -50,48 +66,68 @@ func ParseClinePassAvailableProviders(raw string) []string {
 			return toks
 		}
 	}
+	if m := clinePassProvidersServingRe.FindStringSubmatch(raw); len(m) == 2 {
+		if toks := clinePassSlugTokens(m[1]); len(toks) > 0 {
+			return toks
+		}
+	}
 	start := strings.Index(raw, "{")
 	if start < 0 {
 		return nil
 	}
 	var payload struct {
-		Error struct {
-			Message  string `json:"message"`
-			Metadata struct {
-				AvailableProviders []json.RawMessage `json:"available_providers"`
-			} `json:"metadata"`
-		} `json:"error"`
+		Error   json.RawMessage `json:"error"`
+		Message string          `json:"message"`
 	}
 	if err := json.Unmarshal([]byte(raw[start:]), &payload); err != nil {
 		return nil
 	}
-	var out []string
-	for _, item := range payload.Error.Metadata.AvailableProviders {
-		var s string
-		if err := json.Unmarshal(item, &s); err == nil {
-			if s = strings.TrimSpace(s); s != "" {
-				out = append(out, s)
-				continue
+	if len(payload.Error) > 0 {
+		var errObj struct {
+			Message  string `json:"message"`
+			Metadata struct {
+				AvailableProviders []json.RawMessage `json:"available_providers"`
+			} `json:"metadata"`
+		}
+		if err := json.Unmarshal(payload.Error, &errObj); err == nil {
+			var out []string
+			for _, item := range errObj.Metadata.AvailableProviders {
+				var s string
+				if err := json.Unmarshal(item, &s); err == nil {
+					if s = strings.TrimSpace(s); s != "" {
+						out = append(out, s)
+						continue
+					}
+				}
+				var obj struct {
+					Slug string `json:"slug"`
+				}
+				if err := json.Unmarshal(item, &obj); err == nil {
+					if slug := strings.TrimSpace(obj.Slug); slug != "" {
+						out = append(out, slug)
+					}
+				}
+			}
+			if len(out) > 0 {
+				return clinePassPinDedupe(out)
+			}
+			if msg := strings.TrimSpace(errObj.Message); msg != "" && msg != raw {
+				if toks := parseClinePassAvailableProviders(msg, depth+1); len(toks) > 0 {
+					return toks
+				}
 			}
 		}
-		var obj struct {
-			Slug string `json:"slug"`
-		}
-		if err := json.Unmarshal(item, &obj); err == nil {
-			if slug := strings.TrimSpace(obj.Slug); slug != "" {
-				out = append(out, slug)
+		var errStr string
+		if err := json.Unmarshal(payload.Error, &errStr); err == nil {
+			if errStr = strings.TrimSpace(errStr); errStr != "" && errStr != raw {
+				if toks := parseClinePassAvailableProviders(errStr, depth+1); len(toks) > 0 {
+					return toks
+				}
 			}
 		}
 	}
-	if len(out) > 0 {
-		return clinePassPinDedupe(out)
-	}
-	// Some relays wrap the gateway's plain-text message inside error.message;
-	// recurse once on that text so the "Available providers are:" path applies.
-	if msg := strings.TrimSpace(payload.Error.Message); msg != "" && msg != raw {
-		if m := clinePassAvailableProvidersRe.FindStringSubmatch(msg); len(m) == 2 {
-			return clinePassSlugTokens(m[1])
-		}
+	if msg := strings.TrimSpace(payload.Message); msg != "" && msg != raw {
+		return parseClinePassAvailableProviders(msg, depth+1)
 	}
 	return nil
 }

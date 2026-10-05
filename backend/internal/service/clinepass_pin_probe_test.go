@@ -4,6 +4,7 @@ package service
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -38,6 +39,36 @@ func TestParseClinePassAvailableProvidersDedupesTokens(t *testing.T) {
 	raw := `Available providers are: anthropic, anthropic, openai.`
 	got := ParseClinePassAvailableProviders(raw)
 	require.Equal(t, []string{"anthropic", "openai"}, got)
+}
+
+func TestParseClinePassAvailableProvidersProvidersServingWording(t *testing.T) {
+	raw := `{"error":"inference request failed: failed to invoke model 'z-ai/glm-5.3-flash' from Openrouter: request failed with status 404: {\"error\":{\"message\":\"No allowed providers are available for the selected model. Providers serving z-ai/glm-5.3-flash-20260826: relace, inference-net, sail-research, gmicloud, deepinfra, novita, but your request's provider.only preference permits only: __probe__.\"}}"}`
+	got := ParseClinePassAvailableProviders(raw)
+	require.Equal(t, []string{"relace", "inference-net", "sail-research", "gmicloud", "deepinfra", "novita"}, got)
+}
+
+func TestParseClinePassAvailableProvidersProvidersServingTruncated(t *testing.T) {
+	// Real relay responses are truncated at the raw limit; JSON is invalid but
+	// the wording match still yields the provider list (live glm-5.3-flash case).
+	raw := `{"error":"inference request failed: failed to invoke model 'z-ai/glm-5.3-flash' from Openrouter: request failed with status 404: {\"error\":{\"message\":\"No allowed providers are available for the selected model. Providers serving z-ai/glm-5.3-flash-20260826: relace, inference-net, sail-research, open-inference, wafer, deepinfra, novita, streamlake, decart, gmicloud, dekallm, near-ai, phala, morph, modal, baseten, crusoe, coreweave, atlas-cloud, fireworks, friendli, siliconflow, digitalocean, together, reka, parasail, venice, z-ai, nextbit, inceptron, cloudflare, but your request's provider.o`
+	got := ParseClinePassAvailableProviders(raw)
+	require.Contains(t, got, "gmicloud")
+	require.Contains(t, got, "cloudflare")
+	require.Len(t, got, 31)
+}
+
+func TestParseClinePassAvailableProvidersNestedStringObject(t *testing.T) {
+	// Newer relays nest the OpenRouter object JSON inside a string field.
+	inner := `{"error":{"message":"No endpoints found","metadata":{"available_providers":["anthropic","deepseek","x-ai"]}}}`
+	outer := `{"error":"request failed with status 404: ` + strings.ReplaceAll(inner, `"`, `\"`) + `"}`
+	got := ParseClinePassAvailableProviders(outer)
+	require.Equal(t, []string{"anthropic", "deepseek", "x-ai"}, got)
+}
+
+func TestParseClinePassAvailableProvidersSelfReferentialSafe(t *testing.T) {
+	// A string carrier that embeds itself must terminate (depth limit).
+	raw := `{"error":"{\"error\":\"{\\\"error\\\":\\\"{\\\\\\\"error\\\\\\\":\\\\\\\"{\\\\\\\\\\\"error\\\\\\\\\\\":\\\\\\\\\\\"x\\\\\\\\\\\"}\\\\\\\"}\\\"}\"}"}`
+	require.Nil(t, ParseClinePassAvailableProviders(raw))
 }
 
 func TestBuildClinePassUpstreamProbeBodyVercelPath(t *testing.T) {
