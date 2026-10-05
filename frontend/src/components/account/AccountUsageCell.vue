@@ -1,7 +1,7 @@
 <template>
   <div ref="rootRef" v-if="showUsageWindows">
-    <!-- CommandCode billing windows -->
-    <template v-if="account.platform === 'commandcode'">
+    <!-- CommandCode / ClinePass billing windows -->
+    <template v-if="account.platform === 'commandcode' || account.platform === 'clinepass'">
       <div class="space-y-1">
         <div v-if="loading" class="h-3 w-28 animate-pulse rounded bg-gray-200 dark:bg-gray-700"></div>
         <div v-if="error || usageInfo?.error" class="max-w-[200px] truncate text-xs text-amber-600 dark:text-amber-400" :title="error || usageInfo?.error || undefined">
@@ -10,9 +10,13 @@
         <div v-if="usageInfo?.commandcode_monthly_credits != null" class="text-xs text-gray-600 dark:text-gray-300">
           {{ t('admin.accounts.usageWindow.commandCodeMonthlyCredits') }}: US${{ usageInfo.commandcode_monthly_credits.toFixed(2) }}
         </div>
+        <div v-if="usageInfo?.clinepass_plan" class="max-w-[200px] truncate text-xs text-gray-600 dark:text-gray-300" :title="usageInfo.clinepass_plan">
+          {{ usageInfo.clinepass_plan }}
+        </div>
         <UsageProgressBar v-if="usageInfo?.five_hour" label="5h" :utilization="usageInfo.five_hour.utilization" :resets-at="usageInfo.five_hour.resets_at" color="indigo" />
         <UsageProgressBar v-if="usageInfo?.seven_day" label="7d" :utilization="usageInfo.seven_day.utilization" :resets-at="usageInfo.seven_day.resets_at" color="emerald" />
-        <span v-if="!loading && !error && !usageInfo?.error && !usageInfo?.five_hour && !usageInfo?.seven_day && usageInfo?.commandcode_monthly_credits == null" class="text-xs text-gray-400">—</span>
+        <UsageProgressBar v-if="usageInfo?.thirty_day" label="30d" :utilization="usageInfo.thirty_day.utilization" :resets-at="usageInfo.thirty_day.resets_at" color="purple" />
+        <span v-if="!loading && !error && !usageInfo?.error && !usageInfo?.five_hour && !usageInfo?.seven_day && !usageInfo?.thirty_day && !usageInfo?.clinepass_plan && usageInfo?.commandcode_monthly_credits == null" class="text-xs text-gray-400">—</span>
         <button type="button" class="inline-flex items-center rounded px-1.5 py-0.5 text-[9px] font-medium text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:text-blue-400 dark:hover:bg-blue-900/30" :disabled="loading || activeQueryLoading" @click="loadActiveUsage">
           {{ t('admin.accounts.usageWindow.activeQuery') }}
         </button>
@@ -769,6 +773,8 @@ let visibilityObserver: IntersectionObserver | null = null
 // Show usage windows for OAuth and Setup Token accounts
 const showUsageWindows = computed(() => {
   if (props.account.platform === 'commandcode') return true
+  // ClinePass: plan name + rolling 5h/7d/30d quota windows from the upstream plan API.
+  if (props.account.platform === 'clinepass') return true
   // Gemini: we can always compute local usage windows from DB logs (simulated quotas).
   if (props.account.platform === 'gemini') return true
   // CN providers: apikey 账号也有滚动用量窗口（coding plan）或余额（payg），
@@ -787,6 +793,7 @@ const showUsageWindows = computed(() => {
 
 const shouldFetchUsage = computed(() => {
   if (props.account.platform === 'commandcode') return true
+  if (props.account.platform === 'clinepass') return true
   if (props.account.platform === 'anthropic') {
     return props.account.type === 'oauth' || props.account.type === 'setup-token'
   }

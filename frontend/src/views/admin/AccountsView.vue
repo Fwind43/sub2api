@@ -745,6 +745,7 @@ const accountSupportsBatchUsage = (account: Account) => {
   if (account.platform === 'antigravity') return account.type === 'oauth'
   if (account.platform === 'openai') return account.type === 'oauth'
   if (account.platform === 'grok') return account.type === 'oauth'
+  if (account.platform === 'clinepass') return true
   return false
 }
 
@@ -1654,6 +1655,10 @@ function getAccountPlanType(row: any): string | undefined {
   if (row.platform === 'commandcode') {
     const usage = usageBatchByAccountId.value[String(row.id)]
     return firstNonBlankString(usage?.subscription_tier, row.extra?.subscription_tier, row.credentials?.plan_type)
+  }
+  if (row.platform === 'clinepass') {
+    const usage = usageBatchByAccountId.value[String(row.id)]
+    return firstNonBlankString(usage?.clinepass_plan, row.extra?.subscription_tier, row.credentials?.plan_type, row.parent_plan_type)
   }
   if (row.platform === 'grok') {
     const extra = (row.extra || {}) as Record<string, any>

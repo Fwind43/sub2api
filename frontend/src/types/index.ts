@@ -1453,6 +1453,17 @@ export interface AccountUsageInfo {
   grok_billing?: GrokBillingSummary | null
   subscription_tier?: string
   subscription_tier_raw?: string
+  // ClinePass plan + rolling window caps (upstream /users/me/plan)
+  clinepass_plan?: string
+  clinepass_plan_name?: string
+  clinepass_plan_interval?: string
+  clinepass_plan_active?: boolean
+  clinepass_period_end?: string
+  clinepass_inference_cap?: {
+    five_hour_usd?: number | null
+    seven_day_usd?: number | null
+    thirty_day_usd?: number | null
+  } | null
   ai_credits?: Array<{
     credit_type?: string
     amount?: number

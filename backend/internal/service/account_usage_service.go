@@ -118,6 +118,7 @@ const (
 // UsageCache 封装账户使用量相关的缓存
 type UsageCache struct {
 	commandCodeCache  sync.Map           // credential-scoped CommandCode billing snapshots
+	clinePassCache    sync.Map           // credential-scoped ClinePass plan/quota snapshots
 	apiCache          sync.Map           // accountID -> *apiUsageCache
 	windowStatsCache  sync.Map           // accountID -> *windowStatsCache
 	antigravityCache  sync.Map           // accountID -> *antigravityUsageCache
@@ -244,8 +245,24 @@ type UsageInfo struct {
 	// 错误码（机器可读）：forbidden / unauthenticated / rate_limited / network_error
 	ErrorCode string `json:"error_code,omitempty"`
 
+	// ClinePass 订阅与滚动额度窗口（上游 /users/me/plan[/usage-limits]）
+	ClinePassPlan         string                 `json:"clinepass_plan,omitempty"`          // 上游 plan displayName
+	ClinePassPlanName     string                 `json:"clinepass_plan_name,omitempty"`     // 上游 plan name（可能含 [Internal] 后缀，仅展示用）
+	ClinePassPlanInterval string                 `json:"clinepass_plan_interval,omitempty"` // Monthly / Yearly
+	ClinePassPlanActive   bool                   `json:"clinepass_plan_active,omitempty"`
+	ClinePassPeriodEnd    string                 `json:"clinepass_period_end,omitempty"`
+	ClinePassCap          *ClinePassInferenceCap `json:"clinepass_inference_cap,omitempty"` // 各窗口额度上限（美元）
+
 	// 获取 usage 时的错误信息（降级返回，而非 500）
 	Error string `json:"error,omitempty"`
+}
+
+// ClinePassInferenceCap is the plan-level spend cap per rolling window, in USD.
+// Upstream stores micro-USD (1e8 per USD).
+type ClinePassInferenceCap struct {
+	FiveHourUSD  *float64 `json:"five_hour_usd,omitempty"`
+	SevenDayUSD  *float64 `json:"seven_day_usd,omitempty"`
+	ThirtyDayUSD *float64 `json:"thirty_day_usd,omitempty"`
 }
 
 // ClaudeUsageWindow Anthropic /api/oauth/usage 返回的单个用量窗口
@@ -353,6 +370,9 @@ func (s *AccountUsageService) getUsageForAccount(ctx context.Context, account *A
 	}
 	if account.Platform == "commandcode" {
 		return s.getCommandCodeUsage(ctx, account, forceProbe)
+	}
+	if account.Platform == PlatformClinePass {
+		return s.getClinePassUsage(ctx, account, forceProbe)
 	}
 	accountID := account.ID
 
