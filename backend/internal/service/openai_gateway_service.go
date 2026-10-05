@@ -1227,6 +1227,17 @@ func (s *OpenAIGatewayService) GetAccessToken(ctx context.Context, account *Acco
 			}
 			return accessToken, "oauth", nil
 		}
+		if account.Platform == PlatformClinePass {
+			// ClinePass OAuth uses WorkOS tokens (workos: prefix added by
+			// ClinePassCredential). The transport resolves its own credential, but
+			// this shared prefetch must not fall through to the OpenAI token
+			// provider, which rejects non-OpenAI accounts before any request is sent.
+			credential, kind := account.ClinePassCredential()
+			if strings.TrimSpace(credential) == "" {
+				return "", "", errors.New("access_token not found in credentials")
+			}
+			return credential, kind, nil
+		}
 		// 使用 TokenProvider 获取缓存的 token
 		if s.openAITokenProvider != nil {
 			accessToken, err := s.openAITokenProvider.GetAccessToken(ctx, account)
