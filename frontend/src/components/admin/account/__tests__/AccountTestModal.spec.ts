@@ -220,4 +220,43 @@ describe('AccountTestModal', () => {
       mode: 'compact'
     })
   })
+
+  it('clinepass 账号默认选中目录首位（订阅档）模型', async () => {
+    getAvailableModels.mockResolvedValue([
+      { id: 'cline-pass/deepseek-v4-pro', display_name: 'deepseek-v4-pro' },
+      { id: 'anthropic/claude-sonnet-5.5', display_name: 'claude-sonnet-5.5' },
+      { id: 'cline-free/some-model', display_name: 'some-model' }
+    ])
+
+    const wrapper = mountModal({
+      id: 51,
+      name: 'ClinePass',
+      platform: 'clinepass',
+      type: 'oauth',
+      status: 'active'
+    })
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+
+    expect((wrapper.vm as any).selectedModelId).toBe('cline-pass/deepseek-v4-pro')
+  })
+
+  it('anthropic 账号默认选中 sonnet 模型', async () => {
+    getAvailableModels.mockResolvedValue([
+      { id: 'claude-opus-5.5', display_name: 'Claude Opus 5.5' },
+      { id: 'claude-sonnet-5.5', display_name: 'Claude Sonnet 5.5' }
+    ])
+
+    const wrapper = mountModal({
+      id: 52,
+      name: 'Claude',
+      platform: 'anthropic',
+      type: 'oauth',
+      status: 'active'
+    })
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+
+    expect((wrapper.vm as any).selectedModelId).toBe('claude-sonnet-5.5')
+  })
 })
