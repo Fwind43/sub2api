@@ -482,6 +482,8 @@ export function getModelsByPlatform(platform: string): string[] {
     case 'spark': return sparkModels
     case 'hunyuan': return hunyuanModels
     case 'perplexity': return perplexityModels
+    // ClinePass 模型由上游动态返回（账号 models API），静态表置空，选择器会动态拉取
+    case 'clinepass': return []
     default: return claudeModels
   }
 }

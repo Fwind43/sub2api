@@ -145,7 +145,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { accountsAPI } from '@/api/admin/accounts'
@@ -214,7 +214,8 @@ const upstreamSyncPlatforms = new Set([
   'deepseek',
   'minimax',
   'opencode_go',
-  'commandcode'
+  'commandcode',
+  'clinepass'
 ])
 const canSyncUpstream = computed(() => {
   if (props.accountId) {
@@ -228,19 +229,60 @@ const canSyncUpstream = computed(() => {
 })
 
 const availableOptions = computed(() => {
-  if (normalizedPlatforms.value.length === 0) {
-    return allModels
-  }
+  const optionMap = new Map<string, { value: string; label: string }>()
 
-  const allowedModels = new Set<string>()
-  for (const platform of normalizedPlatforms.value) {
-    for (const model of getModelsByPlatform(platform)) {
-      allowedModels.add(model)
+  if (normalizedPlatforms.value.length === 0) {
+    for (const model of allModels) {
+      optionMap.set(model.value, model)
+    }
+  } else {
+    const allowedModels = new Set<string>()
+    for (const platform of normalizedPlatforms.value) {
+      for (const model of getModelsByPlatform(platform)) {
+        allowedModels.add(model)
+      }
+    }
+    for (const model of allModels) {
+      if (allowedModels.has(model.value)) {
+        optionMap.set(model.value, model)
+      }
     }
   }
 
-  return allModels.filter(model => allowedModels.has(model.value))
+  // 动态拉取的上游模型（如 clinepass，无静态表）并入选项
+  for (const model of dynamicModelOptions.value) {
+    if (!optionMap.has(model.value)) {
+      optionMap.set(model.value, model)
+    }
+  }
+
+  // 已选中的模型始终可见（即使不在静态/动态列表中）
+  for (const value of props.modelValue) {
+    if (!optionMap.has(value)) {
+      optionMap.set(value, { value, label: value })
+    }
+  }
+
+  return [...optionMap.values()]
 })
+
+// clinepass 等无静态模型表的平台：从账号 models API 动态拉取候选
+const dynamicModelOptions = ref<{ value: string; label: string }[]>([])
+const fetchDynamicModelOptions = async () => {
+  dynamicModelOptions.value = []
+  if (!props.accountId) return
+  if (!normalizedPlatforms.value.some(platform => platform === 'clinepass')) return
+  try {
+    const models = await accountsAPI.getAvailableModels(props.accountId)
+    dynamicModelOptions.value = models
+      .map(model => model.id)
+      .filter((id): id is string => !!id)
+      .map(id => ({ value: id, label: id }))
+  } catch (error) {
+    console.warn('[ModelWhitelistSelector] failed to fetch dynamic models', error)
+  }
+}
+watch(() => props.accountId, fetchDynamicModelOptions, { immediate: true })
 
 const filteredModels = computed(() => {
   const query = searchQuery.value.toLowerCase().trim()
