@@ -225,10 +225,17 @@ func (s *AccountTestService) SyncUpstreamModelCatalog(ctx context.Context, accou
 			"model_count", len(models),
 		)
 	}
+	if account != nil && account.IsClinePass() {
+		// ClinePass 对外使用裸模型名，同步结果与 /v1/models 展示保持一致。
+		models = stripClinePassModelPrefixes(models)
+	}
 	catalog := &UpstreamModelCatalog{Models: models, Metadata: make(map[string]UpstreamModelMetadata)}
 	if len(body) > 0 {
 		_, directMetadata, parseErr := extractUpstreamModelCatalog(body, account != nil && account.IsGrok())
 		if parseErr == nil {
+			if account != nil && account.IsClinePass() {
+				directMetadata = stripClinePassModelMetadataKeys(directMetadata)
+			}
 			catalog.Metadata = directMetadata
 		}
 	}
@@ -1329,6 +1336,24 @@ type upstreamModelCapabilityEntry struct {
 
 func extractUpstreamModelIDs(body []byte) ([]string, error) {
 	return extractUpstreamModelIDsWithSelector(body, upstreamModelEntryID)
+}
+
+// stripClinePassModelMetadataKeys aligns capability metadata keys with the
+// bare model ids ClinePass exposes to clients.
+func stripClinePassModelMetadataKeys(in map[string]UpstreamModelMetadata) map[string]UpstreamModelMetadata {
+	if len(in) == 0 {
+		return in
+	}
+	out := make(map[string]UpstreamModelMetadata, len(in))
+	for id, entry := range in {
+		stripped := clinePassStripModelPrefix(id)
+		if _, exists := out[stripped]; exists {
+			continue
+		}
+		entry.ID = stripped
+		out[stripped] = entry
+	}
+	return out
 }
 
 func extractClinePassUpstreamModelIDs(body []byte) ([]string, error) {

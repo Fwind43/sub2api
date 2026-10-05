@@ -131,6 +131,59 @@ func applyClinePassHeaders(header http.Header) {
 	}
 }
 
+// clinePassModelPrefix is the vendor prefix Cline uses for the models covered
+// by the subscription. The relay rejects ids that are not vendor-qualified
+// ("invalid model format. Expected format: modelType/model"), so the prefix is
+// stripped on the way out to clients and restored on the way in to the relay.
+const clinePassModelPrefix = "cline-pass/"
+
+// clinePassStripModelPrefix exposes a subscription-family model id without its
+// vendor prefix: "cline-pass/deepseek-v4-pro" -> "deepseek-v4-pro". Ids from
+// other families (anthropic/*, cline-free/*, ...) are returned unchanged.
+func clinePassStripModelPrefix(model string) string {
+	trimmed := strings.TrimSpace(model)
+	if !strings.HasPrefix(trimmed, clinePassModelPrefix) {
+		return trimmed
+	}
+	return strings.TrimPrefix(trimmed, clinePassModelPrefix)
+}
+
+// ClinePassStripModelPrefix exposes clinePassStripModelPrefix to layers that
+// list models to clients (admin model list, catalog sync).
+func ClinePassStripModelPrefix(model string) string {
+	return clinePassStripModelPrefix(model)
+}
+
+// clinePassRestoreModelPrefix re-qualifies a bare model id for the relay.
+// Already-qualified ids (any "<vendor>/<model>" shape, including ids sent by
+// older clients) are returned unchanged.
+func clinePassRestoreModelPrefix(model string) string {
+	trimmed := strings.TrimSpace(model)
+	if trimmed == "" || strings.Contains(trimmed, "/") {
+		return trimmed
+	}
+	return clinePassModelPrefix + trimmed
+}
+
+// stripClinePassModelPrefixes applies clinePassStripModelPrefix to a list while
+// preserving order and dropping collisions.
+func stripClinePassModelPrefixes(models []string) []string {
+	if len(models) == 0 {
+		return models
+	}
+	out := make([]string, 0, len(models))
+	seen := make(map[string]struct{}, len(models))
+	for _, model := range models {
+		stripped := clinePassStripModelPrefix(model)
+		if _, ok := seen[stripped]; ok {
+			continue
+		}
+		seen[stripped] = struct{}{}
+		out = append(out, stripped)
+	}
+	return out
+}
+
 // sendClinePassRequest posts a (streaming) Chat Completions request to the
 // ClinePass upstream using the selected account's own credential and proxy.
 func (s *OpenAIGatewayService) sendClinePassRequest(

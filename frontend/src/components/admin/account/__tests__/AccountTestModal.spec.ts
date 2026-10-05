@@ -223,7 +223,7 @@ describe('AccountTestModal', () => {
 
   it('clinepass 账号默认选中目录首位（订阅档）模型', async () => {
     getAvailableModels.mockResolvedValue([
-      { id: 'cline-pass/deepseek-v4-pro', display_name: 'deepseek-v4-pro' },
+      { id: 'deepseek-v4-pro', display_name: 'deepseek-v4-pro' },
       { id: 'anthropic/claude-sonnet-5.5', display_name: 'claude-sonnet-5.5' },
       { id: 'cline-free/some-model', display_name: 'some-model' }
     ])
@@ -238,7 +238,7 @@ describe('AccountTestModal', () => {
     await wrapper.setProps({ show: true })
     await flushPromises()
 
-    expect((wrapper.vm as any).selectedModelId).toBe('cline-pass/deepseek-v4-pro')
+    expect((wrapper.vm as any).selectedModelId).toBe('deepseek-v4-pro')
   })
 
   it('anthropic 账号默认选中 sonnet 模型', async () => {

@@ -21,7 +21,9 @@ const ClinePassFallbackTestModel = "apodex/apodex-1.1-mini:free"
 // It mirrors the gateway path (sendClinePassRequest): the OpenAI-compatible
 // chat/completions endpoint is called with `Authorization: Bearer
 // workos:<access token>`, the Cline relay identity headers, and a
-// vendor-qualified model id (`<vendor>/<model>`).
+// vendor-qualified model id (`<vendor>/<model>`). Clients send the bare
+// subscription id (`deepseek-v4-pro`), so the `cline-pass/` prefix is restored
+// before the call.
 //
 // Before this existed, ClinePass accounts fell through to
 // testClaudeAccountConnection, which posts the Cline token to
@@ -35,18 +37,14 @@ func (s *AccountTestService) testClinePassAccountConnection(c *gin.Context, acco
 		testModelID = ClinePassFallbackTestModel
 	}
 	testModelID = account.GetMappedModel(testModelID)
+	// 对外模型名是裸名（无 vendor 前缀），上游要求 "<vendor>/<model>"，回补后转发。
+	testModelID = clinePassRestoreModelPrefix(testModelID)
 
 	c.Writer.Header().Set("Content-Type", "text/event-stream")
 	c.Writer.Header().Set("Cache-Control", "no-cache")
 	c.Writer.Header().Set("Connection", "keep-alive")
 	c.Writer.Header().Set("X-Accel-Buffering", "no")
 	c.Writer.Flush()
-
-	if !strings.Contains(testModelID, "/") {
-		s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
-		return s.sendErrorAndEnd(c, fmt.Sprintf(
-			"ClinePass requires a vendor-qualified model (e.g. \"openai/gpt-6-sol\"), got %q", testModelID))
-	}
 
 	credential, credentialKind := account.ClinePassCredential()
 	if strings.TrimSpace(credential) == "" {

@@ -1231,6 +1231,11 @@ func normalizeOpenAIResponsesImageOnlyModel(reqBody map[string]any) bool {
 }
 
 func normalizeOpenAIModelForUpstream(account *Account, model string) string {
+	if account != nil && account.Platform == PlatformClinePass {
+		// ClinePass 对外暴露裸模型名（无 vendor 前缀），上游要求
+		// "<vendor>/<model>"，出站前统一回补；已带前缀的旧请求原样透传。
+		return clinePassRestoreModelPrefix(model)
+	}
 	if account == nil || account.UsesOpenAICodexProtocol() {
 		return normalizeCodexModel(model)
 	}

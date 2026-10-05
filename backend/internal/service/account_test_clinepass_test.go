@@ -47,7 +47,7 @@ func clinePassChatSSE() *http.Response {
 	return &http.Response{
 		StatusCode: http.StatusOK,
 		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
-		Body: io.NopCloser(strings.NewReader("data: {\"choices\":[{\"delta\":{\"content\":\"OK\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")),
+		Body:       io.NopCloser(strings.NewReader("data: {\"choices\":[{\"delta\":{\"content\":\"OK\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")),
 	}
 }
 
@@ -86,19 +86,46 @@ func TestAccountTestService_ClinePassDefaultsToFreeModel(t *testing.T) {
 	require.Contains(t, string(upstream.bodies[0]), `"model":"`+ClinePassFallbackTestModel+`"`)
 }
 
-// A bare (unqualified) model id is rejected by the Cline gateway, so the tester
-// must fail locally with an actionable message instead of issuing a doomed call.
-func TestAccountTestService_ClinePassRejectsUnqualifiedModelWithoutCallingUpstream(t *testing.T) {
+// Models are exposed to clients without the subscription vendor prefix, so the
+// tester must restore `cline-pass/` before calling the relay (which rejects ids
+// that are not vendor-qualified).
+func TestAccountTestService_ClinePassRestoresVendorPrefixForBareModel(t *testing.T) {
 	account := clinePassAccountTestAccount(403)
-	svc, upstream := clinePassAccountTestService(account) // no mocked response: any call would fail loudly
+	svc, upstream := clinePassAccountTestService(account, clinePassChatSSE())
 	c, recorder := newTestContext()
 
-	err := svc.TestAccountConnection(c, account.ID, "gpt-6.1-sol", "hi", AccountTestModeDefault)
+	err := svc.TestAccountConnection(c, account.ID, "deepseek-v4-pro", "hi", AccountTestModeDefault)
 
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "vendor-qualified")
-	require.Empty(t, upstream.requests)
-	require.Contains(t, recorder.Body.String(), "vendor-qualified")
+	require.NoError(t, err)
+	require.Len(t, upstream.requests, 1)
+	require.Contains(t, string(upstream.bodies[0]), `"model":"cline-pass/deepseek-v4-pro"`)
+	require.Contains(t, recorder.Body.String(), `"model":"cline-pass/deepseek-v4-pro"`)
+}
+
+// Ids from other families already carry a vendor prefix and must pass through
+// untouched.
+func TestAccountTestService_ClinePassKeepsForeignVendorPrefix(t *testing.T) {
+	account := clinePassAccountTestAccount(406)
+	svc, upstream := clinePassAccountTestService(account, clinePassChatSSE())
+	c, _ := newTestContext()
+
+	err := svc.TestAccountConnection(c, account.ID, "anthropic/claude-sonnet-5.5", "hi", AccountTestModeDefault)
+
+	require.NoError(t, err)
+	require.Len(t, upstream.requests, 1)
+	require.Contains(t, string(upstream.bodies[0]), `"model":"anthropic/claude-sonnet-5.5"`)
+}
+
+func TestClinePassModelPrefixRoundTrip(t *testing.T) {
+	require.Equal(t, "deepseek-v4-pro", clinePassStripModelPrefix("cline-pass/deepseek-v4-pro"))
+	require.Equal(t, "anthropic/claude-sonnet-5.5", clinePassStripModelPrefix("anthropic/claude-sonnet-5.5"))
+	require.Equal(t, "deepseek-v4-pro", clinePassStripModelPrefix("  deepseek-v4-pro  "))
+	require.Equal(t, "cline-pass/deepseek-v4-pro", clinePassRestoreModelPrefix("deepseek-v4-pro"))
+	require.Equal(t, "cline-pass/deepseek-v4-pro", clinePassRestoreModelPrefix("cline-pass/deepseek-v4-pro"))
+	require.Equal(t, "anthropic/claude-sonnet-5.5", clinePassRestoreModelPrefix("anthropic/claude-sonnet-5.5"))
+	require.Equal(t, "", clinePassRestoreModelPrefix("   "))
+	require.Equal(t, []string{"deepseek-v4-pro", "glm-5.3", "cline-free/x"},
+		stripClinePassModelPrefixes([]string{"cline-pass/deepseek-v4-pro", "cline-pass/glm-5.3", "cline-free/x", "cline-pass/deepseek-v4-pro"}))
 }
 
 func TestAccountTestService_ClinePassSurfacesUpstream401(t *testing.T) {

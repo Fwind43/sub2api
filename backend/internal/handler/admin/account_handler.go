@@ -3022,10 +3022,12 @@ func (h *AccountHandler) GetAvailableModels(c *gin.Context) {
 			}
 			return
 		}
+		// 排序仍按上游原名（家族分层依赖 vendor 前缀），展示改用裸名。
 		sortClinePassModelIDs(ids)
 		models := make([]claude.Model, 0, len(ids))
 		for _, id := range ids {
-			models = append(models, claude.Model{ID: id, DisplayName: id})
+			displayID := service.ClinePassStripModelPrefix(id)
+			models = append(models, claude.Model{ID: displayID, DisplayName: displayID})
 		}
 		response.Success(c, models)
 		return

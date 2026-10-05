@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
-	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/clinepass"
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyutil"
 )
 
@@ -267,6 +267,14 @@ func (s *ClinePassOAuthService) FetchRecommendedModels(ctx context.Context, acce
 	models, err := client.FetchRecommendedModels(ctx, accessToken)
 	if err != nil {
 		return nil, wrapClinePassOAuthError(err, "CLINEPASS_OAUTH_MODELS_FAILED")
+	}
+	// 对外暴露裸模型名，与网关接受的模型名保持一致。
+	for i := range models {
+		rawID := models[i].ID
+		models[i].ID = clinePassStripModelPrefix(rawID)
+		if strings.TrimSpace(models[i].Name) == "" || strings.TrimSpace(models[i].Name) == strings.TrimSpace(rawID) {
+			models[i].Name = models[i].ID
+		}
 	}
 	return models, nil
 }
