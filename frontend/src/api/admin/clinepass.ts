@@ -131,6 +131,26 @@ export async function listModels(
   return data?.models ?? []
 }
 
+
+export interface ClinePassUpstreamProbeResult {
+  model: string
+  vercel?: string[]
+  openrouter?: string[]
+  vercel_raw?: string
+  openrouter_raw?: string
+}
+
+export async function probeUpstreams(
+  accountId: number,
+  model: string
+): Promise<ClinePassUpstreamProbeResult> {
+  const { data } = await apiClient.post<ClinePassUpstreamProbeResult>(
+    `/admin/accounts/${accountId}/clinepass-upstreams/probe`,
+    { model }
+  )
+  return data
+}
+
 export default {
   getCapabilities,
   startDeviceAuth,

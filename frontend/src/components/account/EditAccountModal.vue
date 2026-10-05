@@ -1663,6 +1663,12 @@
         :type="account.type"
       />
 
+      <ClinePassPinSettings
+        v-if="account?.platform === 'clinepass' && account?.type === 'oauth'"
+        :account-id="account.id"
+        v-model="clinepassPinValue"
+      />
+
       <div class="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <div>
           <label class="input-label">{{ t('admin.accounts.concurrency') }}</label>
@@ -3149,6 +3155,7 @@ import CnBaseUrlPresets from '@/components/account/CnBaseUrlPresets.vue'
 import OpenCodeGoProtocolRulesEditor from '@/components/account/OpenCodeGoProtocolRulesEditor.vue'
 import HeaderOverrideEditor from '@/components/account/HeaderOverrideEditor.vue'
 import OllamaCloudUsageSettings from '@/components/account/OllamaCloudUsageSettings.vue'
+import ClinePassPinSettings from '@/components/account/ClinePassPinSettings.vue'
 import {
   applyAntigravityProjectID,
   applyHeaderOverride,
@@ -3633,6 +3640,15 @@ const upstreamRequestIdHeader = ref('')
 const readUpstreamRequestIdHeader = (extra: unknown): string => {
   const value = (extra as Record<string, unknown> | undefined)?.upstream_request_id_header
   return typeof value === 'string' ? value : ''
+}
+// clinepass 钉上游配置：extra.clinepass_upstream_pin 仅在改动时写回（避免快照覆盖运行态键）。
+const clinepassPinValue = ref<Record<string, unknown> | null>(null)
+const readClinePassPin = (extra: unknown): Record<string, unknown> | null => {
+  const value = (extra as Record<string, unknown> | undefined)?.clinepass_upstream_pin
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return value as Record<string, unknown>
+  }
+  return null
 }
 const allowOverages = ref(false) // For antigravity accounts: enable AI Credits overages
 const antigravityProjectId = ref('')
@@ -4162,6 +4178,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
 	mixedScheduling.value = extra?.mixed_scheduling === true
 	allowOverages.value = extra?.allow_overages === true
 	upstreamRequestIdHeader.value = readUpstreamRequestIdHeader(extra)
+	clinepassPinValue.value = readClinePassPin(extra)
 	openAIImagesUrlToB64JsonEnabled.value = extra?.images_url_to_b64_json === true
 	autoPause5hThreshold.value = typeof extra?.auto_pause_5h_threshold === 'number' ? extra.auto_pause_5h_threshold * 100 : null
 	autoPause7dThreshold.value = typeof extra?.auto_pause_7d_threshold === 'number' ? extra.auto_pause_7d_threshold * 100 : null
@@ -5871,6 +5888,20 @@ const handleSubmit = async () => {
         newExtra.upstream_request_id_header = nextUpstreamRequestIdHeader
       } else {
         delete newExtra.upstream_request_id_header
+      }
+      updatePayload.extra = newExtra
+    }
+
+    // clinepass 钉上游配置同样只在改动时写回 extra。
+    const nextClinePassPin = clinepassPinValue.value
+    const prevClinePassPin = readClinePassPin(props.account.extra)
+    if (JSON.stringify(nextClinePassPin ?? null) !== JSON.stringify(prevClinePassPin ?? null)) {
+      const currentExtra = (updatePayload.extra as Record<string, unknown>) || (props.account.extra as Record<string, unknown>) || {}
+      const newExtra: Record<string, unknown> = { ...currentExtra }
+      if (nextClinePassPin) {
+        newExtra.clinepass_upstream_pin = nextClinePassPin
+      } else {
+        delete newExtra.clinepass_upstream_pin
       }
       updatePayload.extra = newExtra
     }
