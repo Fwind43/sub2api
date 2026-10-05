@@ -228,6 +228,13 @@ type LiteLLMModelPricing struct {
 	// 此类条目只可用于图片计费，token 计费必须回退到 fallback 或 fail-closed，
 	// 否则 token 流量会被按 $0 计费。零值（false）表示条目具备 token 价格。
 	TokenPricingAbsent bool `json:"-"`
+
+	// GlobalPricing 表示该模型价格来自管理页维护的全局统一价文件（优先级最高）。
+	// 计费端据此跳过对 DeepSeek 的官方价强制覆盖与官方峰谷叠加，让运营者配置真正生效。
+	GlobalPricing bool `json:"-"`
+	// GlobalTimePricing 全局统一价条目里的时间段（峰谷）倍率配置，来自条目的
+	// time_pricing 字段；仅全局统一价条目支持该字段。
+	GlobalTimePricing *ChannelTimePricing `json:"-"`
 }
 
 // PricingRemoteClient 远程价格数据获取接口
@@ -258,6 +265,9 @@ type LiteLLMRawEntry struct {
 	OutputCostPerImageToken             *float64 `json:"output_cost_per_image_token"`
 	InputCostPerImageToken              *float64 `json:"input_cost_per_image_token"`
 	CacheReadInputImageTokenCost        *float64 `json:"cache_read_input_image_token_cost"`
+	// TimePricing 全局统一价条目的时间段（峰谷）倍率配置，格式与渠道分时定价一致。
+	// LiteLLM 目录本身不含该字段，仅管理页全局统一价使用。
+	TimePricing json.RawMessage `json:"time_pricing"`
 }
 
 // PricingService 动态价格服务
@@ -659,6 +669,12 @@ func (s *PricingService) parsePricingData(body []byte) (map[string]*LiteLLMModel
 	// 管理页维护的全局统一价优先级最高：压过目录与回退/覆盖文件，但仍由分组/渠道的
 	// 显式定价在后续解析中覆盖。
 	rawData = s.applyGlobalPricingOverrides(rawData)
+	// 全局统一价文件里的模型名集合：这些条目归为"全局自定义价"来源，计费端据此
+	// 跳过对 DeepSeek 的官方价强制覆盖与官方峰谷叠加。
+	globalNames := make(map[string]struct{})
+	for name := range s.loadGlobalPricingEntries() {
+		globalNames[name] = struct{}{}
+	}
 
 	result := make(map[string]*LiteLLMModelPricing)
 	skipped := 0
@@ -688,6 +704,10 @@ func (s *PricingService) parsePricingData(body []byte) (map[string]*LiteLLMModel
 			SupportsPromptCaching: entry.SupportsPromptCaching,
 			SupportsServiceTier:   entry.SupportsServiceTier,
 			TokenPricingAbsent:    entry.InputCostPerToken == nil && entry.OutputCostPerToken == nil,
+		}
+		if _, ok := globalNames[modelName]; ok {
+			pricing.GlobalPricing = true
+			pricing.GlobalTimePricing = parseGlobalTimePricing(entry.TimePricing, modelName)
 		}
 
 		if entry.InputCostPerToken != nil {
@@ -1027,6 +1047,27 @@ func (s *PricingService) applyGlobalPricingOverrides(rawData map[string]json.Raw
 	return rawData
 }
 
+// parseGlobalTimePricing 解析全局统一价条目的 time_pricing 字段。缺失或非法时返回 nil
+// （视作未配置分时倍率），并打 WARN，避免脏配置静默失效。
+func parseGlobalTimePricing(raw json.RawMessage, modelName string) *ChannelTimePricing {
+	if len(raw) == 0 {
+		return nil
+	}
+	var config ChannelTimePricing
+	if err := json.Unmarshal(raw, &config); err != nil {
+		logger.LegacyPrintf("service.pricing", "[Pricing] Warning: global pricing entry %q has invalid time_pricing: %v", modelName, err)
+		return nil
+	}
+	if len(config.Periods) == 0 {
+		return nil
+	}
+	if err := validateChannelTimePricing(&config); err != nil {
+		logger.LegacyPrintf("service.pricing", "[Pricing] Warning: global pricing entry %q time_pricing skipped: %v", modelName, err)
+		return nil
+	}
+	return &config
+}
+
 // GlobalPricingFilePath 暴露全局统一价文件路径（供管理员接口读写）。
 func (s *PricingService) GlobalPricingFilePath() string {
 	return s.globalPricingFilePath()
@@ -1048,6 +1089,20 @@ func (s *PricingService) SaveGlobalPricingEntry(model string, patch json.RawMess
 	var fields map[string]any
 	if err := json.Unmarshal(patch, &fields); err != nil || fields == nil {
 		return fmt.Errorf("pricing entry must be a JSON object")
+	}
+	// time_pricing 复用渠道分时定价的校验口径，非法配置直接拒绝而不是静默丢弃。
+	if rawTime, ok := fields["time_pricing"]; ok && rawTime != nil {
+		body, err := json.Marshal(rawTime)
+		if err != nil {
+			return fmt.Errorf("time_pricing is invalid: %w", err)
+		}
+		var config ChannelTimePricing
+		if err := json.Unmarshal(body, &config); err != nil {
+			return fmt.Errorf("time_pricing is invalid: %w", err)
+		}
+		if err := validateChannelTimePricing(&config); err != nil {
+			return fmt.Errorf("time_pricing is invalid: %w", err)
+		}
 	}
 	s.globalPricingMu.Lock()
 	defer s.globalPricingMu.Unlock()

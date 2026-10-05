@@ -121,6 +121,11 @@ type ModelPricing struct {
 	LongContextOutputMultiplier        float64            // 长上下文整次会话输出倍率
 	ImageOutputPricePerToken           float64            // 图片输出 token 价格 (USD)
 	ImageOutputPriceExplicit           bool               // 是否由渠道定价显式设定（为 true 时即使 == 0 也不回退）
+	// GlobalCustomPricing 表示该价格来自管理页维护的全局统一价：计费端据此跳过
+	// DeepSeek 官方价强制覆盖与官方峰谷叠加，让运营者配置真正生效。
+	GlobalCustomPricing bool
+	// GlobalTimePricing 全局统一价条目自带的时间段（峰谷）倍率配置。
+	GlobalTimePricing *ChannelTimePricing
 }
 
 func normalizeBillingServiceTier(serviceTier string) string {
@@ -258,6 +263,15 @@ func resolvedChannelTimeMultiplier(resolved *ResolvedPricing, at time.Time) floa
 		return 1
 	}
 	return resolved.channelPricing.TimePricing.MultiplierAt(at)
+}
+
+// resolvedGlobalTimeMultiplier 返回全局统一价条目自带的时间段（峰谷）倍率；仅在
+// 计费来源为全局统一价时生效，未配置/配置非法时 MultiplierAt 安全降级为 1。
+func resolvedGlobalTimeMultiplier(resolved *ResolvedPricing, at time.Time) float64 {
+	if resolved == nil || resolved.Source != PricingSourceGlobal || resolved.BasePricing == nil {
+		return 1
+	}
+	return resolved.BasePricing.GlobalTimePricing.MultiplierAt(at)
 }
 
 // ErrModelPricingUnavailable indicates that none of the configured pricing
@@ -1371,7 +1385,9 @@ func (s *BillingService) getModelPricingAt(model string, pricingAt time.Time) (*
 				ImageInputPricePerToken:       litellmPricing.InputCostPerImageToken,
 				ImageCacheReadPricePerToken:   litellmPricing.CacheReadInputImageTokenCost,
 				ImageOutputPricePerToken:      litellmPricing.OutputCostPerImageToken,
-			}, true, pricingAt), nil
+				GlobalCustomPricing:           litellmPricing.GlobalPricing,
+				GlobalTimePricing:             litellmPricing.GlobalTimePricing,
+			}, !litellmPricing.GlobalPricing, pricingAt), nil
 		}
 	}
 
@@ -1582,6 +1598,7 @@ func (s *BillingService) calculateTokenCost(resolved *ResolvedPricing, input Cos
 
 	breakdown := s.computeTokenBreakdown(pricing, input.Tokens, input.RateMultiplier, input.ServiceTier, applyLongCtx)
 	applyCostBreakdownMultiplier(breakdown, resolvedChannelTimeMultiplier(resolved, input.PricingAt))
+	applyCostBreakdownMultiplier(breakdown, resolvedGlobalTimeMultiplier(resolved, pricingAt))
 	applyCostBreakdownMultiplier(breakdown, reasoningEffortBillingMultiplier(input.ReasoningEffort, pricing.ReasoningEffortMultipliers))
 	return breakdown, nil
 }

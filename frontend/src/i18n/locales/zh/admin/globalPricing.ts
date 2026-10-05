@@ -19,6 +19,8 @@ export default {
       unitHint: '单位：美元 / 百万 tokens（$/1M tokens）。留空表示沿用内置目录价。',
       sectionBasic: '基础价格',
       sectionAdvanced: '缓存与图片价格',
+      sectionTimePricing: '时间段（峰谷）定价',
+      timePricingHint: '按本地时区的时间段对上述价格整体乘以倍率（例如夜间 0.5 倍）。留空表示不分时段，全天使用基础价格。',
       priceInput: '输入',
       priceOutput: '输出',
       priceCacheWrite: '缓存写入',

@@ -19,6 +19,8 @@ export default {
       unitHint: 'Unit: USD per 1M tokens ($/1M tokens). Leave empty to keep the built-in catalog price.',
       sectionBasic: 'Base prices',
       sectionAdvanced: 'Cache & image prices',
+      sectionTimePricing: 'Time-of-day (peak/off-peak) pricing',
+      timePricingHint: 'Multiply all prices above by a factor during the given local time windows (e.g. 0.5x at night). Leave empty to use the base prices all day.',
       priceInput: 'Input',
       priceOutput: 'Output',
       priceCacheWrite: 'Cache write',

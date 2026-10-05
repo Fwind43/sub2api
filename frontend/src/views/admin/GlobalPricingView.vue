@@ -140,6 +140,16 @@
             <Input v-model="form.image_output_price" type="number" :label="t('admin.globalPricing.priceImageOutput')" placeholder="0" />
           </div>
         </details>
+
+        <div>
+          <h4 class="mb-2 text-sm font-semibold text-gray-800 dark:text-gray-100">
+            {{ t('admin.globalPricing.sectionTimePricing') }}
+          </h4>
+          <p class="mb-2 text-xs text-gray-500 dark:text-dark-300">
+            {{ t('admin.globalPricing.timePricingHint') }}
+          </p>
+          <TimePricingSection v-model="form.time_pricing" />
+        </div>
       </div>
 
       <template #footer>
@@ -174,7 +184,17 @@ import Icon from '@/components/icons/Icon.vue'
 import Input from '@/components/common/Input.vue'
 import Select from '@/components/common/Select.vue'
 import globalPricingAPI from '@/api/admin/globalPricing'
-import { mTokToPerToken, perTokenToMTok } from '@/components/admin/channel/types'
+import type { ChannelTimePricing } from '@/api/admin/channels'
+import TimePricingSection from '@/components/admin/channel/TimePricingSection.vue'
+import {
+  apiTimePricingToForm,
+  createDefaultTimePricingForm,
+  formTimePricingToAPI,
+  mTokToPerToken,
+  perTokenToMTok,
+  validateTimePricing,
+  type TimePricingFormEntry
+} from '@/components/admin/channel/types'
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -194,6 +214,7 @@ interface EditForm {
   cache_read_price: string | number
   image_input_price: string | number
   image_output_price: string | number
+  time_pricing: TimePricingFormEntry
 }
 
 /** 表单字段 ←→ LiteLLM 目录字段。API 存 per-token，界面用 $/MTok。 */
@@ -228,7 +249,8 @@ const form = reactive<EditForm>({
   cache_write_1h_price: '',
   cache_read_price: '',
   image_input_price: '',
-  image_output_price: ''
+  image_output_price: '',
+  time_pricing: createDefaultTimePricingForm()
 })
 
 const modeOptions = computed(() => [
@@ -279,6 +301,13 @@ function resetForm() {
   form.model = ''
   form.mode = ''
   for (const field of PRICE_FIELDS) form[field.key] = ''
+  form.time_pricing = createDefaultTimePricingForm()
+}
+
+/** 读取条目里的时间段定价配置（不存在时返回空表单）。 */
+function readTimePricing(pricing: Record<string, unknown>): TimePricingFormEntry {
+  const raw = pricing.time_pricing as ChannelTimePricing | null | undefined
+  return apiTimePricingToForm(raw ?? null)
 }
 
 function openCreate() {
@@ -293,6 +322,7 @@ function openEdit(row: PricingRow) {
   const mode = row.pricing.mode
   form.mode = typeof mode === 'string' ? mode : ''
   for (const field of PRICE_FIELDS) form[field.key] = readPrice(row.pricing, field.json)
+  form.time_pricing = readTimePricing(row.pricing)
   editing.value = true
   dialogOpen.value = true
 }
@@ -312,6 +342,8 @@ function buildPayload(): Record<string, unknown> | string {
     payload[field.json] = mTokToPerToken(num)
   }
   if (form.mode !== '') payload.mode = form.mode
+  const timePricing = formTimePricingToAPI(form.time_pricing)
+  if (timePricing) payload.time_pricing = timePricing
   return payload
 }
 
@@ -324,6 +356,11 @@ async function submit() {
   const payload = buildPayload()
   if (typeof payload === 'string') {
     appStore.showError(payload)
+    return
+  }
+  const timePricingError = validateTimePricing(form.time_pricing, t)
+  if (timePricingError) {
+    appStore.showError(timePricingError)
     return
   }
   if (Object.keys(payload).length === 0) {

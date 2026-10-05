@@ -12,6 +12,7 @@ const (
 	PricingSourceGroup    = "group"
 	PricingSourceChannel  = "channel"
 	PricingSourceLiteLLM  = "litellm"
+	PricingSourceGlobal   = "global"
 	PricingSourceFallback = "fallback"
 )
 
@@ -174,6 +175,11 @@ func (r *ModelPricingResolver) resolveBasePricing(model string) (*ModelPricing, 
 		slog.Debug("failed to get model pricing from LiteLLM, using fallback",
 			"model", model, "error", err)
 		return nil, PricingSourceFallback
+	}
+	// 全局统一价条目优先级最高（压过目录/回退），且不经 DeepSeek 官方价强制覆盖：
+	// 单独标记来源，让计费端保留运营者配置并施加条目自带的分时倍率。
+	if pricing != nil && pricing.GlobalCustomPricing {
+		return pricing, PricingSourceGlobal
 	}
 	return pricing, PricingSourceLiteLLM
 }
