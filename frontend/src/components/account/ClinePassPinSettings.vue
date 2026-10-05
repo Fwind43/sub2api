@@ -278,15 +278,13 @@ const stateSignature = (v: Record<string, unknown> | null): string => {
   return [m, up, p, s, JSON.stringify(rows)].join('|')
 }
 
-const currentSignature = (): string => {
-  return [
-    mode.value,
-    upstream.value.trim(),
-    pipelines.value,
-    sort.value,
-    JSON.stringify(modelRows.value.map((r) => ({ m: r.model, u: r.upstream })))
-  ].join('|')
-}
+// Canonical-form signature for comparison: serialize this component through
+// buildValue() so that an echoed modelValue is compared like-for-like.
+// buildValue() intentionally drops empty/partial rows (e.g. a freshly added
+// row, or a row the user started filling from the upstream side); comparing
+// against raw internal state made the hydrate guard treat our own echo as an
+// external change and wipe in-progress rows ("Add does nothing").
+const currentSignature = (): string => stateSignature(buildValue())
 
 const hydrate = (value: Record<string, unknown> | null | undefined) => {
   const incoming =
