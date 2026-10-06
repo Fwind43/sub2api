@@ -186,6 +186,20 @@ class ReleaseMatrixTest(unittest.TestCase):
                     self.assertIn('ghcr.io/exampleowner/sub2api:9', log)
 
 
+    def test_plan_accepts_four_part_fork_version(self):
+        version = '0.2.13.1'
+        self.assertEqual(release.archive_name(version, {'goos': 'linux', 'goarch': 'amd64'}),
+                         f'sub2api_{version}_linux_amd64.tar.gz')
+        with patch.dict(os.environ, {'GITHUB_OUTPUT': 'outputs', 'GITHUB_REPOSITORY_OWNER': 'ExampleOwner'}), \
+                patch.object(subprocess, 'check_output', return_value='a' * 40 + '\n'):
+            release.plan(argparse.Namespace(ref='v' + version, dry_run=False, simple=False))
+        output = dict(line.split('=', 1) for line in Path('outputs').read_text().splitlines())
+        self.assertEqual(output['tag'], 'v' + version)
+        self.assertEqual(output['version'], version)
+        self.assertEqual(release.VERSION_FILE.read_text().strip(), version)
+        with self.assertRaises(ValueError):
+            release.archive_name('0.2.13.x', {'goos': 'linux', 'goarch': 'amd64'})
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -25,7 +25,9 @@ jobs:
         run: |
           set -euo pipefail
           version="$(tr -d '\r\n' < backend/cmd/server/VERSION)"
-          test "$version" = '0.2.29-fwind'
+          # Fork version scheme: <upstream-version>.<x>, e.g. 0.2.13.1 is the first
+          # fork release on upstream v0.2.13. Keep in sync with backend/cmd/server/VERSION.
+          test "$version" = '0.2.13.1'
           echo "value=$version" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3

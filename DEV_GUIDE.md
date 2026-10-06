@@ -56,6 +56,17 @@ npm install -g pnpm
 - Go 版本必须是 **1.27.0**：三个 workflow 都用 `go-version-file: backend/go.mod` 取版本，随后硬断言 `go version | grep -q 'go1.27.0'`。升级 Go 时要同时改 `backend/go.mod`、`backend-ci.yml`（两处）、`release.yml`、`security-scan.yml` 里的这句断言，**以及三个 Dockerfile 里的 Go 构建镜像**（`Dockerfile` / `deploy/Dockerfile` 的 `ARG GOLANG_IMAGE`、`backend/Dockerfile` 的 `FROM golang:`）。前者漏了 CI 会在版本校验步骤直接失败；**后者漏了 CI 不会报，而是等到有人用这些 Dockerfile 构建时才失败**（`go.mod requires go >= X (running Y; GOTOOLCHAIN=local)`）。
 - 前端使用 `pnpm install --frozen-lockfile`，必须提交 `pnpm-lock.yaml`
 
+### 版本号规则（Fork）
+
+本 fork 的版本号形如 `<上游版本>.<x>`：上游 release 为 `v0.2.13` 时，fork 使用 `v0.2.13.1`。`x` 从 1 开始，每在同一上游版本基线上发一次 fork 版本就递增 1；合入上游新版本后编号切换为 `<新上游版本>.1`（例如上游 `v0.2.14` → fork `v0.2.14.1`）。
+
+版本号唯一来源是 `backend/cmd/server/VERSION`（编译期 embed 进二进制；若当前 commit 正好是 tag，`backend/scripts/resolve-version.sh` 会优先取 tag）。发版前必须同步以下两处，否则 CI 直接失败：
+
+- `backend/cmd/server/VERSION`
+- `.github/workflows/image-short-tag.yml` 中的硬断言 `test "$version" = '<版本>'`
+
+`release.yml`（tag `v*` 触发）用 `.github/release-tools/release_matrix.py` 解析 tag；该 fork 已将其 `VERSION_RE` 放宽为支持 4 段版本（如 `0.2.13.1`）。
+
 ### 本地测试命令
 
 ```bash
