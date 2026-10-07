@@ -60,7 +60,7 @@ func (s *AccountTestService) testClinePassAccountConnection(c *gin.Context, acco
 	s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
 	s.sendEvent(c, TestEvent{Type: "status", Text: "Testing via /api/v1/chat/completions"})
 
-	payload := createOpenAIChatCompletionsTestPayload(testModelID, prompt)
+	payload := createOpenAIChatCompletionsTestPayload(testModelID, prompt, accountTestEffort(c))
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Failed to create test payload")

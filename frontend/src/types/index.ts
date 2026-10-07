@@ -2561,6 +2561,7 @@ export interface IQTestPlan {
   cron_expression: string
   enabled: boolean
   max_results: number
+  reasoning_effort: string
   last_run_at: string | null
   next_run_at: string | null
   created_at: string
@@ -2575,6 +2576,7 @@ export interface CreateIQTestPlanRequest {
   cron_expression?: string
   enabled?: boolean
   max_results?: number
+  reasoning_effort?: string
 }
 
 export interface UpdateIQTestPlanRequest {
@@ -2583,6 +2585,7 @@ export interface UpdateIQTestPlanRequest {
   cron_expression?: string
   enabled?: boolean
   max_results?: number
+  reasoning_effort?: string
 }
 
 export interface IQTestQuestionResult {
@@ -2621,4 +2624,5 @@ export interface RunIQTestRequest {
   question_id: number
   account_id: number
   model_id?: string
+  reasoning_effort?: string
 }

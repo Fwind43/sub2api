@@ -679,6 +679,9 @@ export default {
       accountRequired: '请填写账户 ID',
       loadFailed: '加载智商测试数据失败',
       saveFailed: '保存失败',
+      reasoningEffort: '推理强度',
+      reasoningEffortDefault: '默认（不指定）',
+      modelDefault: '默认（由账户决定）',
     },
 
     // Ops Monitoring

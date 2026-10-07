@@ -101,7 +101,7 @@ export async function listPlansByAccount(accountId: number): Promise<IQTestPlan[
 
 export async function runForAccount(
   accountId: number,
-  req: { bank_id: number; question_id: number; model_id?: string }
+  req: { bank_id: number; question_id: number; model_id?: string; reasoning_effort?: string }
 ): Promise<IQTestRun> {
   const { data } = await apiClient.post<IQTestRun>(`/admin/accounts/${accountId}/iq-test/run`, req)
   return data

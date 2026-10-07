@@ -67,9 +67,12 @@ type TestEvent struct {
 
 // AccountTestOptions carries optional media for admin connectivity tests.
 // ImageDataURL / AudioDataURL are full data URLs (data:<mime>;base64,...).
+// ReasoningEffort optionally overrides the upstream reasoning/thinking effort
+// for this test run (values match the repo-wide REASONING_EFFORT_LEVELS).
 type AccountTestOptions struct {
-	ImageDataURL string
-	AudioDataURL string
+	ImageDataURL    string
+	AudioDataURL    string
+	ReasoningEffort string
 }
 
 func firstAccountTestOptions(opts []AccountTestOptions) AccountTestOptions {
@@ -77,6 +80,64 @@ func firstAccountTestOptions(opts []AccountTestOptions) AccountTestOptions {
 		return AccountTestOptions{}
 	}
 	return opts[0]
+}
+
+// accountTestEffortContextKey carries AccountTestOptions.ReasoningEffort on the
+// gin context so nested payload builders can honor it during a single test run.
+const accountTestEffortContextKey = "account_test_reasoning_effort"
+
+// accountTestEffort returns the reasoning effort configured for the current
+// admin connectivity test, or "" when unset.
+func accountTestEffort(c *gin.Context) string {
+	if c == nil {
+		return ""
+	}
+	return c.GetString(accountTestEffortContextKey)
+}
+
+// normalizeAccountTestReasoningEffort lowercases/trims raw and returns it only
+// when it is one of the repo-wide supported reasoning effort levels; otherwise
+// it returns "" (keep the upstream default).
+func normalizeAccountTestReasoningEffort(raw string) string {
+	value := strings.ToLower(strings.TrimSpace(raw))
+	switch value {
+	case "none", "minimal", "low", "medium", "high", "xhigh", "max":
+		return value
+	default:
+		return ""
+	}
+}
+
+// accountTestThinkingBudgetByEffort maps repo-wide reasoning effort levels onto
+// the thinking budgets used by admin connectivity tests for Claude Code style
+// and Gemini test payloads. "none" and "" keep the upstream default (no
+// thinking configuration is emitted).
+var accountTestThinkingBudgetByEffort = map[string]int{
+	"minimal": 1024,
+	"low":     1024,
+	"medium":  4096,
+	"high":    10240,
+	"xhigh":   24576,
+	"max":     32768,
+}
+
+// applyClaudeTestReasoningEffort mirrors the selected effort onto a Claude Code
+// style test payload by enabling thinking with a matching budget so the value
+// really reaches the upstream. When the budget exceeds max_tokens, max_tokens
+// is raised so upstream validation accepts the request.
+func applyClaudeTestReasoningEffort(payload map[string]any, rawEffort string) {
+	effort := normalizeAccountTestReasoningEffort(rawEffort)
+	budget, ok := accountTestThinkingBudgetByEffort[effort]
+	if !ok {
+		return
+	}
+	payload["thinking"] = map[string]any{
+		"type":          "enabled",
+		"budget_tokens": budget,
+	}
+	if maxTokens, ok := payload["max_tokens"].(int); ok && budget >= maxTokens {
+		payload["max_tokens"] = budget + 1024
+	}
 }
 
 // maxAccountTestMediaBytes caps inbound data-URL payloads for admin tests (~8 MiB).
@@ -314,7 +375,7 @@ func generateSessionString() (string, error) {
 
 // createTestPayload creates a Claude Code style test request payload.
 // prompt is optional; when empty the legacy "hi" probe text is used.
-func createTestPayload(modelID string, prompt string) (map[string]any, error) {
+func createTestPayload(modelID string, prompt string, reasoningEffort string) (map[string]any, error) {
 	sessionID, err := generateSessionString()
 	if err != nil {
 		return nil, err
@@ -324,7 +385,7 @@ func createTestPayload(modelID string, prompt string) (map[string]any, error) {
 		testPrompt = "hi"
 	}
 
-	return map[string]any{
+	payload := map[string]any{
 		"model": modelID,
 		"messages": []map[string]any{
 			{
@@ -355,7 +416,9 @@ func createTestPayload(modelID string, prompt string) (map[string]any, error) {
 		"max_tokens":  1024,
 		"temperature": 1,
 		"stream":      true,
-	}, nil
+	}
+	applyClaudeTestReasoningEffort(payload, reasoningEffort)
+	return payload, nil
 }
 
 // TestAccountConnection tests an account's connection by sending a test request
@@ -366,6 +429,9 @@ func createTestPayload(modelID string, prompt string) (map[string]any, error) {
 func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int64, modelID string, prompt string, mode string, opts ...AccountTestOptions) error {
 	ctx := c.Request.Context()
 	testOpts := firstAccountTestOptions(opts)
+	if eff := normalizeAccountTestReasoningEffort(testOpts.ReasoningEffort); eff != "" {
+		c.Set(accountTestEffortContextKey, eff)
+	}
 
 	// Get account
 	account, err := s.accountRepo.GetByID(ctx, accountID)
@@ -560,7 +626,7 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 	c.Writer.Flush()
 
 	// Create Claude Code style payload (same for all account types)
-	payload, err := createTestPayload(testModelID, prompt)
+	payload, err := createTestPayload(testModelID, prompt, accountTestEffort(c))
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Failed to create test payload")
 	}
@@ -638,7 +704,7 @@ func (s *AccountTestService) testClaudeVertexServiceAccountConnection(c *gin.Con
 	c.Writer.Header().Set("X-Accel-Buffering", "no")
 	c.Writer.Flush()
 
-	payload, err := createTestPayload(testModelID, prompt)
+	payload, err := createTestPayload(testModelID, prompt, accountTestEffort(c))
 	if err != nil {
 		return s.sendErrorAndEnd(c, "Failed to create test payload")
 	}
@@ -890,7 +956,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	if isOAuth {
 		upstreamTestModelID = normalizeOpenAIModelForUpstream(credentialAccount, testModelID)
 	}
-	payload := createOpenAITestPayload(upstreamTestModelID, isOAuth, prompt)
+	payload := createOpenAITestPayload(upstreamTestModelID, isOAuth, prompt, accountTestEffort(c))
 	payloadBytes, _ := json.Marshal(payload)
 
 	// Send test_start event once. A task-invalid Agent Identity response may
@@ -2132,7 +2198,7 @@ func (s *AccountTestService) testOpenAIChatCompletionsConnection(
 	c.Writer.Header().Set("X-Accel-Buffering", "no")
 	c.Writer.Flush()
 
-	payload := createOpenAIChatCompletionsTestPayload(testModelID, prompt)
+	payload := createOpenAIChatCompletionsTestPayload(testModelID, prompt, accountTestEffort(c))
 	payloadBytes, _ := json.Marshal(payload)
 
 	s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
@@ -2410,7 +2476,7 @@ func (s *AccountTestService) testGeminiAccountConnection(c *gin.Context, account
 	c.Writer.Flush()
 
 	// Create test payload (Gemini format)
-	payload := createGeminiTestPayload(testModelID, prompt)
+	payload := createGeminiTestPayload(testModelID, prompt, accountTestEffort(c))
 
 	// Build request based on account type
 	var req *http.Request
@@ -2639,7 +2705,7 @@ func (s *AccountTestService) buildCodeAssistRequest(ctx context.Context, accessT
 
 // createGeminiTestPayload creates a minimal test payload for Gemini API.
 // Image models use the image-generation path so the frontend can preview the returned image.
-func createGeminiTestPayload(modelID string, prompt string) []byte {
+func createGeminiTestPayload(modelID string, prompt string, reasoningEffort string) []byte {
 	if isImageGenerationModel(modelID) {
 		imagePrompt := strings.TrimSpace(prompt)
 		if imagePrompt == "" {
@@ -2685,6 +2751,13 @@ func createGeminiTestPayload(modelID string, prompt string) []byte {
 				{"text": "You are a helpful AI assistant."},
 			},
 		},
+	}
+	if budget, ok := accountTestThinkingBudgetByEffort[normalizeAccountTestReasoningEffort(reasoningEffort)]; ok {
+		payload["generationConfig"] = map[string]any{
+			"thinkingConfig": map[string]any{
+				"thinkingBudget": budget,
+			},
+		}
 	}
 	bytes, _ := json.Marshal(payload)
 	return bytes
@@ -2773,7 +2846,7 @@ func (s *AccountTestService) processGeminiStream(c *gin.Context, body io.Reader)
 
 // createOpenAITestPayload creates a test payload for OpenAI Responses API.
 // prompt is optional; when empty the legacy "hi" probe text is used.
-func createOpenAITestPayload(modelID string, isOAuth bool, prompt string) map[string]any {
+func createOpenAITestPayload(modelID string, isOAuth bool, prompt string, reasoningEffort string) map[string]any {
 	testPrompt := strings.TrimSpace(prompt)
 	if testPrompt == "" {
 		testPrompt = "hi"
@@ -2802,16 +2875,22 @@ func createOpenAITestPayload(modelID string, isOAuth bool, prompt string) map[st
 	// All accounts require instructions for Responses API
 	payload["instructions"] = openai.DefaultInstructions
 
+	// reasoning.effort carries the admin-selected reasoning effort for this
+	// test run through to the upstream.
+	if effort := normalizeAccountTestReasoningEffort(reasoningEffort); effort != "" {
+		payload["reasoning"] = map[string]any{"effort": effort}
+	}
+
 	return payload
 }
 
-func createOpenAIChatCompletionsTestPayload(modelID string, prompt string) map[string]any {
+func createOpenAIChatCompletionsTestPayload(modelID string, prompt string, reasoningEffort string) map[string]any {
 	testPrompt := strings.TrimSpace(prompt)
 	if testPrompt == "" {
 		testPrompt = "hi"
 	}
 
-	return map[string]any{
+	payload := map[string]any{
 		"model": modelID,
 		"messages": []map[string]any{
 			{
@@ -2821,6 +2900,10 @@ func createOpenAIChatCompletionsTestPayload(modelID string, prompt string) map[s
 		},
 		"stream": true,
 	}
+	if effort := normalizeAccountTestReasoningEffort(reasoningEffort); effort != "" {
+		payload["reasoning_effort"] = effort
+	}
+	return payload
 }
 
 // processClaudeStream processes the SSE stream from Claude API

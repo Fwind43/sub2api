@@ -13,10 +13,14 @@
             <Icon name="play" size="sm" class="mr-1" />
             {{ t('admin.iqTest.runNow') }}
           </button>
+          <button class="btn btn-secondary text-sm" @click="openPlanForm(null)">
+            <Icon name="plus" size="sm" class="mr-1" />
+            {{ t('admin.iqTest.addPlan') }}
+          </button>
         </div>
       </div>
 
-      <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
+      <div class="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
         <div>
           <label class="mb-1 block text-xs text-gray-600 dark:text-gray-400">{{ t('admin.iqTest.bank') }}</label>
           <Select v-model="selectedBankId" :options="bankOptions" :placeholder="t('admin.iqTest.selectBank')" />
@@ -27,7 +31,11 @@
         </div>
         <div>
           <label class="mb-1 block text-xs text-gray-600 dark:text-gray-400">{{ t('admin.iqTest.model') }}</label>
-          <Input v-model="modelId" :placeholder="t('admin.iqTest.modelPlaceholder')" />
+          <Select v-model="modelId" :options="modelOptions" :placeholder="t('admin.iqTest.modelDefault')" />
+        </div>
+        <div>
+          <label class="mb-1 block text-xs text-gray-600 dark:text-gray-400">{{ t('admin.iqTest.reasoningEffort') }}</label>
+          <Select v-model="effort" :options="effortOptions" :placeholder="t('admin.iqTest.reasoningEffortDefault')" />
         </div>
       </div>
 
@@ -42,11 +50,55 @@
             {{ plan.enabled ? t('admin.iqTest.enabled') : t('common.disabled') }}
           </span>
           <button class="btn btn-secondary text-sm" :disabled="running" @click="runPlan(plan)">{{ t('admin.iqTest.runNow') }}</button>
+          <button class="btn btn-secondary text-sm" @click="openPlanForm(plan)">{{ t('common.edit') }}</button>
+          <button class="btn btn-danger text-sm" @click="askRemovePlan(plan)">{{ t('common.delete') }}</button>
         </div>
       </div>
 
       <div>
-        <div class="mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.iqTest.runs') }}</div>
+        <div v-if="planForm" class="mb-3 space-y-3 rounded-xl border border-primary-200 bg-primary-50/50 p-3 dark:border-primary-800 dark:bg-primary-900/20">
+        <div class="text-sm font-medium text-gray-700 dark:text-gray-300">
+          {{ planForm.id ? t('admin.iqTest.editPlan') : t('admin.iqTest.addPlan') }}
+        </div>
+        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div>
+            <label class="mb-1 block text-xs text-gray-600 dark:text-gray-400">{{ t('admin.iqTest.bank') }}</label>
+            <Select v-model="planForm.bank_id" :options="bankOptions" @change="loadPlanQuestions" />
+          </div>
+          <div>
+            <label class="mb-1 block text-xs text-gray-600 dark:text-gray-400">{{ t('admin.iqTest.question') }}</label>
+            <Select v-model="planForm.question_id" :options="planQuestionOptions" :placeholder="t('admin.iqTest.selectQuestion')" />
+          </div>
+          <div>
+            <label class="mb-1 block text-xs text-gray-600 dark:text-gray-400">{{ t('admin.iqTest.model') }}</label>
+            <Select v-model="planForm.model_id" :options="modelOptions" :placeholder="t('admin.iqTest.modelDefault')" />
+          </div>
+          <div>
+            <label class="mb-1 block text-xs text-gray-600 dark:text-gray-400">{{ t('admin.iqTest.reasoningEffort') }}</label>
+            <Select v-model="planForm.reasoning_effort" :options="effortOptions" :placeholder="t('admin.iqTest.reasoningEffortDefault')" />
+          </div>
+          <div>
+            <label class="mb-1 block text-xs text-gray-600 dark:text-gray-400">{{ t('admin.iqTest.cronExpression') }}</label>
+            <Input v-model="planForm.cron_expression" placeholder="0 3 * * *" />
+          </div>
+          <div>
+            <label class="mb-1 block text-xs text-gray-600 dark:text-gray-400">{{ t('admin.iqTest.maxResults') }}</label>
+            <Input v-model="planForm.max_results" type="number" placeholder="50" />
+          </div>
+        </div>
+        <div class="flex items-center justify-between">
+          <label class="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
+            <Toggle v-model="planForm.enabled" />
+            {{ t('admin.iqTest.enabled') }}
+          </label>
+          <div class="flex items-center gap-2">
+            <button class="btn btn-secondary text-sm" @click="planForm = null">{{ t('common.cancel') }}</button>
+            <button class="btn btn-primary text-sm" :disabled="saving" @click="savePlanForm">{{ t('common.save') }}</button>
+          </div>
+        </div>
+      </div>
+
+<div class="mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.iqTest.runs') }}</div>
         <div v-if="!runs.length" class="rounded-lg border border-dashed border-gray-300 p-4 text-center text-sm text-gray-500 dark:border-dark-600 dark:text-gray-400">
           {{ t('admin.iqTest.noRuns') }}
         </div>
@@ -76,6 +128,13 @@
         </div>
       </div>
     </div>
+    <ConfirmDialog
+      :show="showPlanDeleteConfirm"
+      :title="t('common.confirm')"
+      :message="t('admin.iqTest.confirmDeletePlan')"
+      @confirm="doRemovePlan"
+      @cancel="showPlanDeleteConfirm = false"
+    />
   </BaseDialog>
 </template>
 
@@ -87,9 +146,12 @@ import { adminAPI } from '@/api/admin'
 import type { IQTestBank, IQTestPlan, IQTestQuestion, IQTestRun } from '@/types'
 import type { SelectOption } from '@/components/common/Select.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Input from '@/components/common/Input.vue'
 import Select from '@/components/common/Select.vue'
+import Toggle from '@/components/common/Toggle.vue'
 import Icon from '@/components/icons/Icon.vue'
+import { REASONING_EFFORT_LEVELS } from '@/constants/channel'
 
 const props = defineProps<{
   show: boolean
@@ -110,6 +172,8 @@ const selectedBankId = ref<number | null>(null)
 const selectedQuestionId = ref<number | null>(null)
 const runQuestions = ref<IQTestQuestion[]>([])
 const modelId = ref('')
+const effort = ref('')
+const modelOptions = ref<SelectOption[]>([{ value: '', label: t('admin.iqTest.modelDefault') }])
 const expanded = reactive<Record<number, boolean>>({})
 
 const bankOptions = computed<SelectOption[]>(() =>
@@ -120,18 +184,29 @@ const questionOptions = computed<SelectOption[]>(() =>
   runQuestions.value.map((q) => ({ value: q.id, label: `#${q.id} ${q.prompt.slice(0, 40)}` }))
 )
 
+const effortLabel = (level: string) => (level === 'xhigh' ? 'XHigh' : level.charAt(0).toUpperCase() + level.slice(1))
+const effortOptions = computed<SelectOption[]>(() => [
+  { value: '', label: t('admin.iqTest.reasoningEffortDefault') },
+  ...REASONING_EFFORT_LEVELS.map((level) => ({ value: level, label: effortLabel(level) }))
+])
+
 const load = async () => {
   if (!props.accountId) return
   loading.value = true
   try {
-    const [bankList, planList, runList] = await Promise.all([
+    const [bankList, planList, runList, modelList] = await Promise.all([
       adminAPI.iqTest.listBanks(),
       adminAPI.iqTest.listPlansByAccount(props.accountId),
-      adminAPI.iqTest.listRunsByAccount(props.accountId, 20)
+      adminAPI.iqTest.listRunsByAccount(props.accountId, 20),
+      adminAPI.accounts.getAvailableModels(props.accountId)
     ])
     banks.value = bankList
     plans.value = planList
     runs.value = runList
+    modelOptions.value = [
+      { value: '', label: t('admin.iqTest.modelDefault') },
+      ...modelList.map((model) => ({ value: model.id, label: model.display_name || model.id }))
+    ]
     if (selectedBankId.value == null && bankList.length) selectedBankId.value = bankList[0].id
   } catch (error: any) {
     appStore.showError(error?.message || t('admin.iqTest.loadFailed'))
@@ -169,7 +244,8 @@ const runNow = async () => {
     const run = await adminAPI.iqTest.runForAccount(props.accountId, {
       bank_id: selectedBankId.value,
       question_id: questionId,
-      model_id: modelId.value
+      model_id: modelId.value,
+      reasoning_effort: effort.value
     })
     appStore.showSuccess(`${t('admin.iqTest.runStarted')}: ${run.score}`)
     await refreshRuns()
@@ -208,6 +284,127 @@ const loadRunDetail = async (runId: number) => {
   }
 }
 
+const showPlanDeleteConfirm = ref(false)
+const deletingPlan = ref<IQTestPlan | null>(null)
+const saving = ref(false)
+const planForm = ref<null | {
+  id: number | null
+  bank_id: number | null
+  question_id: number | null
+  model_id: string
+  reasoning_effort: string
+  cron_expression: string
+  max_results: string
+  enabled: boolean
+}>(null)
+const planQuestions = ref<IQTestQuestion[]>([])
+
+const planQuestionOptions = computed<SelectOption[]>(() =>
+  planQuestions.value.map((q) => ({ value: q.id, label: `#${q.id} ${q.prompt.slice(0, 40)}` }))
+)
+
+const openPlanForm = (plan: IQTestPlan | null) => {
+  planQuestions.value = []
+  if (plan) {
+    planForm.value = {
+      id: plan.id,
+      bank_id: plan.bank_id,
+      question_id: plan.question_id ?? null,
+      model_id: plan.model_id,
+      reasoning_effort: plan.reasoning_effort || '',
+      cron_expression: plan.cron_expression,
+      max_results: String(plan.max_results || 50),
+      enabled: plan.enabled
+    }
+    void loadPlanQuestions()
+  } else {
+    planForm.value = {
+      id: null,
+      bank_id: selectedBankId.value,
+      question_id: null,
+      model_id: '',
+      reasoning_effort: '',
+      cron_expression: '',
+      max_results: '50',
+      enabled: true
+    }
+    if (selectedBankId.value != null) void loadPlanQuestions()
+  }
+}
+
+const loadPlanQuestions = async () => {
+  const bankId = planForm.value?.bank_id
+  planQuestions.value = []
+  if (bankId == null) return
+  try {
+    const detail = await adminAPI.iqTest.getBank(bankId)
+    planQuestions.value = detail.questions || []
+  } catch (error: any) {
+    appStore.showError(error?.message || t('admin.iqTest.loadFailed'))
+  }
+}
+
+const savePlanForm = async () => {
+  const form = planForm.value
+  if (!form || !props.accountId) return
+  if (form.bank_id == null || form.question_id == null) {
+    appStore.showError(t('admin.iqTest.questionRequired'))
+    return
+  }
+  saving.value = true
+  try {
+    if (form.id) {
+      await adminAPI.iqTest.updatePlan(form.id, {
+        question_id: Number(form.question_id),
+        model_id: form.model_id,
+        cron_expression: form.cron_expression,
+        enabled: form.enabled,
+        max_results: Number(form.max_results) || 50,
+        reasoning_effort: form.reasoning_effort
+      })
+      appStore.showSuccess(t('admin.iqTest.planUpdated'))
+    } else {
+      await adminAPI.iqTest.createPlan({
+        bank_id: form.bank_id,
+        question_id: Number(form.question_id),
+        account_id: props.accountId,
+        model_id: form.model_id,
+        cron_expression: form.cron_expression,
+        enabled: form.enabled,
+        max_results: Number(form.max_results) || 50,
+        reasoning_effort: form.reasoning_effort
+      })
+      appStore.showSuccess(t('admin.iqTest.planCreated'))
+    }
+    planForm.value = null
+    plans.value = await adminAPI.iqTest.listPlansByAccount(props.accountId)
+  } catch (error: any) {
+    appStore.showError(error?.message || t('admin.iqTest.saveFailed'))
+  } finally {
+    saving.value = false
+  }
+}
+
+const askRemovePlan = (plan: IQTestPlan) => {
+  deletingPlan.value = plan
+  showPlanDeleteConfirm.value = true
+}
+
+const doRemovePlan = async () => {
+  const plan = deletingPlan.value
+  showPlanDeleteConfirm.value = false
+  if (!plan || !props.accountId) return
+  try {
+    await adminAPI.iqTest.deletePlan(plan.id)
+    appStore.showSuccess(t('admin.iqTest.planDeleted'))
+    plans.value = await adminAPI.iqTest.listPlansByAccount(props.accountId)
+  } catch (error: any) {
+    appStore.showError(error?.message || t('admin.iqTest.saveFailed'))
+  } finally {
+    deletingPlan.value = null
+  }
+}
+
 watch(
   () => [props.show, props.accountId],
   ([show]) => {
@@ -215,6 +412,8 @@ watch(
       selectedBankId.value = null
       selectedQuestionId.value = null
       modelId.value = ''
+      effort.value = ''
+      planForm.value = null
       load()
     }
   }

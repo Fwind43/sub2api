@@ -114,7 +114,7 @@ func (s *IQTestRunnerService) runScheduled() {
 }
 
 func (s *IQTestRunnerService) runOnePlan(ctx context.Context, plan *IQTestPlan) {
-	if _, err := s.iqSvc.RunQuestion(ctx, plan.BankID, plan.QuestionID, plan.AccountID, plan.ModelID, IQTestTriggerScheduled, plan.ID); err != nil {
+	if _, err := s.iqSvc.RunQuestion(ctx, plan.BankID, plan.QuestionID, plan.AccountID, plan.ModelID, IQTestTriggerScheduled, plan.ID, plan.ReasoningEffort); err != nil {
 		logger.LegacyPrintf("service.iq_test_runner", "[IQTestRunner] plan=%d RunQuestion error: %v", plan.ID, err)
 	}
 

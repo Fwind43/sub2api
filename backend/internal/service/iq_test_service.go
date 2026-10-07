@@ -176,6 +176,7 @@ func (s *IQTestService) CreatePlan(ctx context.Context, plan *IQTestPlan) (*IQTe
 	if plan.MaxResults <= 0 {
 		plan.MaxResults = 50
 	}
+	plan.ReasoningEffort = normalizeAccountTestReasoningEffort(plan.ReasoningEffort)
 	return s.planRepo.Create(ctx, plan)
 }
 
@@ -209,6 +210,7 @@ func (s *IQTestService) UpdatePlan(ctx context.Context, plan *IQTestPlan) (*IQTe
 	if plan.MaxResults <= 0 {
 		plan.MaxResults = 50
 	}
+	plan.ReasoningEffort = normalizeAccountTestReasoningEffort(plan.ReasoningEffort)
 	return s.planRepo.Update(ctx, plan)
 }
 
@@ -237,7 +239,7 @@ func (s *IQTestService) GetRun(ctx context.Context, id int64) (*IQTestRun, error
 //
 // The run scores 100 when the reply is graded correct and 0 otherwise. A
 // failed model call is recorded with status "failed" and the underlying error.
-func (s *IQTestService) RunQuestion(ctx context.Context, bankID, questionID, accountID int64, modelID, trigger string, planID int64) (*IQTestRun, error) {
+func (s *IQTestService) RunQuestion(ctx context.Context, bankID, questionID, accountID int64, modelID, trigger string, planID int64, reasoningEffort string) (*IQTestRun, error) {
 	if bankID <= 0 {
 		return nil, fmt.Errorf("bank_id is required")
 	}
@@ -258,7 +260,7 @@ func (s *IQTestService) RunQuestion(ctx context.Context, bankID, questionID, acc
 	}
 
 	startedAt := time.Now()
-	response, _, qErr := s.accountTestSvc.RunQuestionBackground(ctx, accountID, modelID, question.Prompt)
+	response, _, qErr := s.accountTestSvc.RunQuestionBackground(ctx, accountID, modelID, question.Prompt, reasoningEffort)
 	item := IQTestQuestionResult{
 		QuestionID: question.ID,
 		Type:       question.Type,

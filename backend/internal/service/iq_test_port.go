@@ -50,18 +50,19 @@ type IQTestQuestion struct {
 // IQTestPlan schedules one question of a bank against an account on a cron
 // expression. QuestionID is 0 when unset.
 type IQTestPlan struct {
-	ID             int64      `json:"id"`
-	BankID         int64      `json:"bank_id"`
-	QuestionID     int64      `json:"question_id"`
-	AccountID      int64      `json:"account_id"`
-	ModelID        string     `json:"model_id"`
-	CronExpression string     `json:"cron_expression"`
-	Enabled        bool       `json:"enabled"`
-	MaxResults     int        `json:"max_results"`
-	LastRunAt      *time.Time `json:"last_run_at"`
-	NextRunAt      *time.Time `json:"next_run_at"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
+	ID              int64      `json:"id"`
+	BankID          int64      `json:"bank_id"`
+	QuestionID      int64      `json:"question_id"`
+	AccountID       int64      `json:"account_id"`
+	ModelID         string     `json:"model_id"`
+	CronExpression  string     `json:"cron_expression"`
+	Enabled         bool       `json:"enabled"`
+	MaxResults      int        `json:"max_results"`
+	ReasoningEffort string     `json:"reasoning_effort"`
+	LastRunAt       *time.Time `json:"last_run_at"`
+	NextRunAt       *time.Time `json:"next_run_at"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
 }
 
 // IQTestQuestionResult is the per-question outcome of a run.

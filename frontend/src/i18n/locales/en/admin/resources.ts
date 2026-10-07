@@ -682,6 +682,9 @@ export default {
       accountRequired: 'Account ID is required',
       loadFailed: 'Failed to load IQ test data',
       saveFailed: 'Failed to save',
+      reasoningEffort: 'Reasoning Effort',
+      reasoningEffortDefault: 'Default (unspecified)',
+      modelDefault: 'Default (decided by account)',
     },
 
     // Ops Monitoring

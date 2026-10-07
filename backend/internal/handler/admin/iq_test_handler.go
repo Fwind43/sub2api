@@ -44,28 +44,31 @@ type updateIQTestBankRequest struct {
 }
 
 type createIQTestPlanRequest struct {
-	BankID         int64  `json:"bank_id" binding:"required"`
-	QuestionID     int64  `json:"question_id" binding:"required"`
-	AccountID      int64  `json:"account_id" binding:"required"`
-	ModelID        string `json:"model_id"`
-	CronExpression string `json:"cron_expression"`
-	Enabled        *bool  `json:"enabled"`
-	MaxResults     int    `json:"max_results"`
+	BankID          int64  `json:"bank_id" binding:"required"`
+	QuestionID      int64  `json:"question_id" binding:"required"`
+	AccountID       int64  `json:"account_id" binding:"required"`
+	ModelID         string `json:"model_id"`
+	CronExpression  string `json:"cron_expression"`
+	Enabled         *bool  `json:"enabled"`
+	MaxResults      int    `json:"max_results"`
+	ReasoningEffort string `json:"reasoning_effort"`
 }
 
 type updateIQTestPlanRequest struct {
-	QuestionID     *int64 `json:"question_id"`
-	ModelID        string `json:"model_id"`
-	CronExpression string `json:"cron_expression"`
-	Enabled        *bool  `json:"enabled"`
-	MaxResults     int    `json:"max_results"`
+	QuestionID      *int64  `json:"question_id"`
+	ModelID         string  `json:"model_id"`
+	CronExpression  string  `json:"cron_expression"`
+	Enabled         *bool   `json:"enabled"`
+	MaxResults      int     `json:"max_results"`
+	ReasoningEffort *string `json:"reasoning_effort"`
 }
 
 type runIQTestRequest struct {
-	BankID     int64  `json:"bank_id" binding:"required"`
-	QuestionID int64  `json:"question_id" binding:"required"`
-	AccountID  int64  `json:"account_id" binding:"required"`
-	ModelID   string `json:"model_id"`
+	BankID          int64  `json:"bank_id" binding:"required"`
+	QuestionID      int64  `json:"question_id" binding:"required"`
+	AccountID       int64  `json:"account_id" binding:"required"`
+	ModelID         string `json:"model_id"`
+	ReasoningEffort string `json:"reasoning_effort"`
 }
 
 func toIQTestQuestions(reqs []iqTestQuestionRequest) []*service.IQTestQuestion {
@@ -217,9 +220,10 @@ func (h *IQTestHandler) CreatePlan(c *gin.Context) {
 		QuestionID:     req.QuestionID,
 		AccountID:      req.AccountID,
 		ModelID:        req.ModelID,
-		CronExpression: req.CronExpression,
-		Enabled:        true,
-		MaxResults:     req.MaxResults,
+		CronExpression:  req.CronExpression,
+		Enabled:         true,
+		MaxResults:      req.MaxResults,
+		ReasoningEffort: req.ReasoningEffort,
 	}
 	if req.Enabled != nil {
 		plan.Enabled = *req.Enabled
@@ -265,6 +269,9 @@ func (h *IQTestHandler) UpdatePlan(c *gin.Context) {
 	if req.MaxResults > 0 {
 		existing.MaxResults = req.MaxResults
 	}
+	if req.ReasoningEffort != nil {
+		existing.ReasoningEffort = *req.ReasoningEffort
+	}
 
 	updated, err := h.iqTestSvc.UpdatePlan(c.Request.Context(), existing)
 	if err != nil {
@@ -295,7 +302,7 @@ func (h *IQTestHandler) Run(c *gin.Context) {
 		response.BadRequest(c, err.Error())
 		return
 	}
-	run, err := h.iqTestSvc.RunQuestion(c.Request.Context(), req.BankID, req.QuestionID, req.AccountID, req.ModelID, service.IQTestTriggerManual, 0)
+	run, err := h.iqTestSvc.RunQuestion(c.Request.Context(), req.BankID, req.QuestionID, req.AccountID, req.ModelID, service.IQTestTriggerManual, 0, req.ReasoningEffort)
 	if err != nil {
 		response.BadRequest(c, err.Error())
 		return
@@ -354,7 +361,7 @@ func (h *IQTestHandler) RunPlanNow(c *gin.Context) {
 		response.NotFound(c, "plan not found")
 		return
 	}
-	run, err := h.iqTestSvc.RunQuestion(c.Request.Context(), plan.BankID, plan.QuestionID, plan.AccountID, plan.ModelID, service.IQTestTriggerManual, plan.ID)
+	run, err := h.iqTestSvc.RunQuestion(c.Request.Context(), plan.BankID, plan.QuestionID, plan.AccountID, plan.ModelID, service.IQTestTriggerManual, plan.ID, plan.ReasoningEffort)
 	if err != nil {
 		response.BadRequest(c, err.Error())
 		return
@@ -370,15 +377,16 @@ func (h *IQTestHandler) RunForAccount(c *gin.Context) {
 		return
 	}
 	var req struct {
-		BankID     int64  `json:"bank_id" binding:"required"`
-		QuestionID int64  `json:"question_id" binding:"required"`
-		ModelID    string `json:"model_id"`
+		BankID          int64  `json:"bank_id" binding:"required"`
+		QuestionID      int64  `json:"question_id" binding:"required"`
+		ModelID         string `json:"model_id"`
+		ReasoningEffort string `json:"reasoning_effort"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, err.Error())
 		return
 	}
-	run, err := h.iqTestSvc.RunQuestion(c.Request.Context(), req.BankID, req.QuestionID, accountID, req.ModelID, service.IQTestTriggerManual, 0)
+	run, err := h.iqTestSvc.RunQuestion(c.Request.Context(), req.BankID, req.QuestionID, accountID, req.ModelID, service.IQTestTriggerManual, 0, req.ReasoningEffort)
 	if err != nil {
 		response.BadRequest(c, err.Error())
 		return

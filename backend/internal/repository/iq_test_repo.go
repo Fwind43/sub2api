@@ -159,7 +159,7 @@ func NewIQTestPlanRepository(db *sql.DB) service.IQTestPlanRepository {
 	return &iqTestPlanRepository{db: db}
 }
 
-const iqTestPlanColumns = `id, bank_id, question_id, account_id, model_id, cron_expression, enabled, max_results, last_run_at, next_run_at, created_at, updated_at`
+const iqTestPlanColumns = `id, bank_id, question_id, account_id, model_id, cron_expression, enabled, max_results, reasoning_effort, last_run_at, next_run_at, created_at, updated_at`
 
 func (r *iqTestPlanRepository) Create(ctx context.Context, plan *service.IQTestPlan) (*service.IQTestPlan, error) {
 	var questionID any
@@ -167,10 +167,10 @@ func (r *iqTestPlanRepository) Create(ctx context.Context, plan *service.IQTestP
 		questionID = plan.QuestionID
 	}
 	row := r.db.QueryRowContext(ctx, `
-		INSERT INTO iq_test_plans (bank_id, question_id, account_id, model_id, cron_expression, enabled, max_results, next_run_at, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
+		INSERT INTO iq_test_plans (bank_id, question_id, account_id, model_id, cron_expression, enabled, max_results, reasoning_effort, next_run_at, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
 		RETURNING `+iqTestPlanColumns,
-		plan.BankID, questionID, plan.AccountID, plan.ModelID, plan.CronExpression, plan.Enabled, plan.MaxResults, plan.NextRunAt)
+		plan.BankID, questionID, plan.AccountID, plan.ModelID, plan.CronExpression, plan.Enabled, plan.MaxResults, plan.ReasoningEffort, plan.NextRunAt)
 	return scanIQTestPlan(row)
 }
 
@@ -220,10 +220,10 @@ func (r *iqTestPlanRepository) Update(ctx context.Context, plan *service.IQTestP
 	row := r.db.QueryRowContext(ctx, `
 		UPDATE iq_test_plans
 		SET bank_id = $2, question_id = $3, account_id = $4, model_id = $5, cron_expression = $6,
-		    enabled = $7, max_results = $8, next_run_at = $9, updated_at = NOW()
+		    enabled = $7, max_results = $8, reasoning_effort = $9, next_run_at = $10, updated_at = NOW()
 		WHERE id = $1
 		RETURNING `+iqTestPlanColumns,
-		plan.ID, plan.BankID, questionID, plan.AccountID, plan.ModelID, plan.CronExpression, plan.Enabled, plan.MaxResults, plan.NextRunAt)
+		plan.ID, plan.BankID, questionID, plan.AccountID, plan.ModelID, plan.CronExpression, plan.Enabled, plan.MaxResults, plan.ReasoningEffort, plan.NextRunAt)
 	return scanIQTestPlan(row)
 }
 
@@ -383,7 +383,7 @@ func scanIQTestPlan(row scannable) (*service.IQTestPlan, error) {
 	p := &service.IQTestPlan{}
 	var questionID sql.NullInt64
 	if err := row.Scan(&p.ID, &p.BankID, &questionID, &p.AccountID, &p.ModelID, &p.CronExpression, &p.Enabled,
-		&p.MaxResults, &p.LastRunAt, &p.NextRunAt, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		&p.MaxResults, &p.ReasoningEffort, &p.LastRunAt, &p.NextRunAt, &p.CreatedAt, &p.UpdatedAt); err != nil {
 		return nil, err
 	}
 	if questionID.Valid {

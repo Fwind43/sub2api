@@ -15,16 +15,17 @@ import (
 // concatenated assistant text plus the wall-clock latency in milliseconds.
 //
 // It reuses TestAccountConnection, so it inherits per-platform routing,
-// credential handling and SSE parsing; the prompt is threaded through every
-// payload builder (Claude / OpenAI Responses / Chat Completions / Gemini).
-func (s *AccountTestService) RunQuestionBackground(ctx context.Context, accountID int64, modelID string, prompt string) (string, int64, error) {
+// credential handling and SSE parsing; the prompt and reasoning effort are
+// threaded through every payload builder (Claude / OpenAI Responses / Chat
+// Completions / Gemini).
+func (s *AccountTestService) RunQuestionBackground(ctx context.Context, accountID int64, modelID string, prompt string, reasoningEffort string) (string, int64, error) {
 	startedAt := time.Now()
 
 	w := httptest.NewRecorder()
 	ginCtx, _ := gin.CreateTestContext(w)
 	ginCtx.Request = (&http.Request{}).WithContext(ctx)
 
-	testErr := s.TestAccountConnection(ginCtx, accountID, modelID, prompt, AccountTestModeDefault)
+	testErr := s.TestAccountConnection(ginCtx, accountID, modelID, prompt, AccountTestModeDefault, AccountTestOptions{ReasoningEffort: reasoningEffort})
 
 	latencyMs := time.Since(startedAt).Milliseconds()
 	responseText, errMsg := parseTestSSEOutput(w.Body.String())
