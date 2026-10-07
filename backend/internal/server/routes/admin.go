@@ -115,6 +115,9 @@ func RegisterAdminRoutes(
 		// 定时测试计划
 		registerScheduledTestRoutes(admin, h)
 
+		// 账户智商测试
+		registerIQTestRoutes(admin, h)
+
 		// 渠道管理
 		registerChannelRoutes(admin, h)
 
@@ -743,6 +746,38 @@ func registerUserAttributeRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		attrs.PUT("/:id", h.Admin.UserAttribute.UpdateDefinition)
 		attrs.DELETE("/:id", h.Admin.UserAttribute.DeleteDefinition)
 	}
+}
+
+func registerIQTestRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	banks := admin.Group("/iq-test/banks")
+	{
+		banks.GET("", h.Admin.IQTest.ListBanks)
+		banks.POST("", h.Admin.IQTest.CreateBank)
+		banks.GET("/:id", h.Admin.IQTest.GetBank)
+		banks.PUT("/:id", h.Admin.IQTest.UpdateBank)
+		banks.DELETE("/:id", h.Admin.IQTest.DeleteBank)
+	}
+
+	plans := admin.Group("/iq-test/plans")
+	{
+		plans.GET("", h.Admin.IQTest.ListPlansByBank)
+		plans.POST("", h.Admin.IQTest.CreatePlan)
+		plans.PUT("/:id", h.Admin.IQTest.UpdatePlan)
+		plans.DELETE("/:id", h.Admin.IQTest.DeletePlan)
+		plans.POST("/:id/run", h.Admin.IQTest.RunPlanNow)
+		plans.GET("/:id/runs", h.Admin.IQTest.ListRunsByPlan)
+	}
+
+	runs := admin.Group("/iq-test/runs")
+	{
+		runs.GET("", h.Admin.IQTest.ListRuns)
+		runs.POST("", h.Admin.IQTest.Run)
+		runs.GET("/:id", h.Admin.IQTest.GetRun)
+	}
+
+	admin.GET("/accounts/:id/iq-test-plans", h.Admin.IQTest.ListPlansByAccount)
+	admin.POST("/accounts/:id/iq-test/run", h.Admin.IQTest.RunForAccount)
+	admin.GET("/accounts/:id/iq-test/runs", h.Admin.IQTest.ListRunsByAccount)
 }
 
 func registerScheduledTestRoutes(admin *gin.RouterGroup, h *handler.Handlers) {

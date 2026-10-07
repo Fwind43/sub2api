@@ -2500,3 +2500,125 @@ export type {
   PlatformQuotaWindow,
   PlatformQuotasResponse,
 } from '@/api/admin/users'
+
+// ==================== IQ Test Types ====================
+
+export type IQTestQuestionType = 'single_choice' | 'open'
+
+export interface IQTestQuestion {
+  id: number
+  bank_id: number
+  position: number
+  type: IQTestQuestionType | string
+  prompt: string
+  options: string[]
+  answer: string
+  keywords: string[]
+  weight: number
+  max_tokens: number
+}
+
+export interface IQTestBank {
+  id: number
+  name: string
+  description: string
+  enabled: boolean
+  created_at: string
+  updated_at: string
+  questions?: IQTestQuestion[]
+}
+
+export interface IQTestQuestionInput {
+  type: string
+  prompt: string
+  options?: string[]
+  answer: string
+  keywords?: string[]
+  weight?: number
+}
+
+export interface CreateIQTestBankRequest {
+  name: string
+  description?: string
+  enabled?: boolean
+  questions?: IQTestQuestionInput[]
+}
+
+export interface UpdateIQTestBankRequest {
+  name?: string
+  description?: string
+  enabled?: boolean
+  questions?: IQTestQuestionInput[]
+  replace_questions?: boolean
+}
+
+export interface IQTestPlan {
+  id: number
+  bank_id: number
+  question_id: number | null
+  account_id: number
+  model_id: string
+  cron_expression: string
+  enabled: boolean
+  max_results: number
+  last_run_at: string | null
+  next_run_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface CreateIQTestPlanRequest {
+  bank_id: number
+  question_id: number
+  account_id: number
+  model_id?: string
+  cron_expression?: string
+  enabled?: boolean
+  max_results?: number
+}
+
+export interface UpdateIQTestPlanRequest {
+  question_id?: number
+  model_id?: string
+  cron_expression?: string
+  enabled?: boolean
+  max_results?: number
+}
+
+export interface IQTestQuestionResult {
+  question_id: number
+  type: string
+  prompt: string
+  response: string
+  expected: string
+  correct: boolean
+  weight: number
+  error_message?: string
+}
+
+export interface IQTestRun {
+  id: number
+  plan_id: number
+  bank_id: number
+  question_id: number
+  account_id: number
+  model_id: string
+  trigger: string
+  status: string
+  score: number
+  total: number
+  correct: number
+  latency_ms: number
+  error_message: string
+  details: IQTestQuestionResult[] | null
+  started_at: string
+  finished_at: string
+  created_at: string
+}
+
+export interface RunIQTestRequest {
+  bank_id: number
+  question_id: number
+  account_id: number
+  model_id?: string
+}

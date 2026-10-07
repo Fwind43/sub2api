@@ -654,6 +654,27 @@ func ProvideScheduledTestService(
 	return NewScheduledTestService(planRepo, resultRepo)
 }
 
+// ProvideIQTestService creates IQTestService.
+func ProvideIQTestService(
+	bankRepo IQTestBankRepository,
+	planRepo IQTestPlanRepository,
+	runRepo IQTestRunRepository,
+	accountTestSvc *AccountTestService,
+) *IQTestService {
+	return NewIQTestService(bankRepo, planRepo, runRepo, accountTestSvc)
+}
+
+// ProvideIQTestRunnerService creates and starts IQTestRunnerService.
+func ProvideIQTestRunnerService(
+	planRepo IQTestPlanRepository,
+	iqSvc *IQTestService,
+	cfg *config.Config,
+) *IQTestRunnerService {
+	svc := NewIQTestRunnerService(planRepo, iqSvc, cfg)
+	svc.Start()
+	return svc
+}
+
 // ProvideScheduledTestRunnerService creates and starts ScheduledTestRunnerService.
 func ProvideScheduledTestRunnerService(
 	planRepo ScheduledTestPlanRepository,
@@ -968,6 +989,8 @@ var ProviderSet = wire.NewSet(
 	ProvideIdempotencyCleanupService,
 	ProvideScheduledTestService,
 	ProvideScheduledTestRunnerService,
+	ProvideIQTestService,
+	ProvideIQTestRunnerService,
 	NewGroupCapacityService,
 	NewChannelService,
 	wire.Bind(new(ChannelCacheInvalidator), new(*ChannelService)),
