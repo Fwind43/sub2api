@@ -69,6 +69,7 @@ type AccountHandler struct {
 	ollamaCloudUsage        *service.OllamaCloudUsageService
 	cfg                     *config.Config
 	opencodeGoUsage         *service.OpenCodeGoUsageService
+	clinePassLastKnown      service.ClinePassLastKnownStore
 }
 
 // SetUpstreamBillingProbeService attaches the optional remote billing probe service.
@@ -82,6 +83,11 @@ func (h *AccountHandler) SetOllamaCloudUsageService(usage *service.OllamaCloudUs
 
 func (h *AccountHandler) SetOpenCodeGoUsageService(usage *service.OpenCodeGoUsageService) {
 	h.opencodeGoUsage = usage
+}
+
+// SetClinePassLastKnownStore attaches the clinepass last-known upstream store.
+func (h *AccountHandler) SetClinePassLastKnownStore(store service.ClinePassLastKnownStore) {
+	h.clinePassLastKnown = store
 }
 
 // NewAccountHandler creates a new admin account handler

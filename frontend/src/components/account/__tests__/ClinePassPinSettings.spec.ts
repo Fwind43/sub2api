@@ -1,11 +1,12 @@
 import { mount } from '@vue/test-utils'
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { nextTick } from 'vue'
 
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
-vi.mock('@/api/admin/clinepass', () => ({ probeUpstreams: vi.fn() }))
+vi.mock('@/api/admin/clinepass', () => ({ probeUpstreams: vi.fn(), listLastKnown: vi.fn() }))
 
 import ClinePassPinSettings from '../ClinePassPinSettings.vue'
+import { listLastKnown } from '@/api/admin/clinepass'
 
 const settle = async () => {
   await nextTick()
@@ -114,6 +115,70 @@ describe('ClinePassPinSettings model overrides', () => {
     const kept = rows[0].findAll('input')
     expect((kept[0].element as HTMLInputElement).value).toBe('x-model')
     expect((kept[1].element as HTMLInputElement).value).toBe('morph')
+    wrapper.unmount()
+  })
+})
+
+describe('ClinePassPinSettings last-known upstream', () => {
+  beforeEach(() => {
+    vi.mocked(listLastKnown).mockReset()
+  })
+
+  it('renders the last actually-hit upstream with its timestamp', async () => {
+    vi.mocked(listLastKnown).mockResolvedValue({
+      account_id: 1,
+      items: [
+        {
+          model: 'glm-5.3-flash',
+          provider: 'deepinfra',
+          pipeline: 'planner',
+          canonical_slug: 'z-ai/glm-5.3-flash',
+          fallbacks: ['novita', 'wafer'],
+          observed_at: '2026-10-08T09:00:00Z'
+        }
+      ]
+    })
+    const wrapper = mountPin({ mode: 'strict', upstream: 'deepinfra' })
+    await settle()
+    await settle()
+
+    const rows = wrapper.findAll('[data-testid="clinepass-lastknown-row"]')
+    expect(rows).toHaveLength(1)
+    expect(rows[0].text()).toContain('glm-5.3-flash')
+    expect(rows[0].text()).toContain('deepinfra')
+    expect(rows[0].text()).toContain('novita, wafer')
+    // Pin expectation matches the observed upstream.
+    expect(wrapper.get('[data-testid="clinepass-lastknown-verdict"]').text()).toBe(
+      'admin.accounts.clinepassPin.lastKnownMatch'
+    )
+    wrapper.unmount()
+  })
+
+  it('flags a mismatch against the configured pin', async () => {
+    vi.mocked(listLastKnown).mockResolvedValue({
+      account_id: 1,
+      items: [
+        { model: 'glm-5.3-flash', provider: 'novita', pipeline: 'direct', observed_at: '2026-10-08T09:00:00Z' }
+      ]
+    })
+    const wrapper = mountPin({ mode: 'strict', upstream: 'deepinfra' })
+    await settle()
+    await settle()
+
+    expect(wrapper.get('[data-testid="clinepass-lastknown-verdict"]').text()).toBe(
+      'admin.accounts.clinepassPin.lastKnownMismatch'
+    )
+    wrapper.unmount()
+  })
+
+  it('shows the empty state when nothing was observed yet', async () => {
+    vi.mocked(listLastKnown).mockResolvedValue({ account_id: 1, items: [] })
+    const wrapper = mountPin({ mode: 'off' })
+    await settle()
+    await settle()
+
+    expect(wrapper.findAll('[data-testid="clinepass-lastknown-row"]')).toHaveLength(0)
+    expect(wrapper.text()).toContain('admin.accounts.clinepassPin.lastKnownEmpty')
     wrapper.unmount()
   })
 })

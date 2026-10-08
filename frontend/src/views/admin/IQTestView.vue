@@ -87,6 +87,7 @@
                 <th class="px-3 py-2">{{ t('admin.iqTest.trigger') }}</th>
                 <th class="px-3 py-2">{{ t('admin.iqTest.status') }}</th>
                 <th class="px-3 py-2">{{ t('admin.iqTest.startedAt') }}</th>
+                <th class="px-3 py-2">{{ t('admin.iqTest.finishedAt') }}</th>
                 <th class="px-3 py-2"></th>
               </tr>
             </thead>
@@ -107,6 +108,7 @@
                     </span>
                   </td>
                   <td class="px-3 py-2 text-gray-500">{{ formatDateTime(run.started_at) }}</td>
+                  <td class="px-3 py-2 text-gray-500">{{ run.finished_at ? formatDateTime(run.finished_at) : '-' }}</td>
                   <td class="px-3 py-2 text-right">
                     <button class="text-primary-600 hover:underline dark:text-primary-400" @click="toggleRunDetails(run.id)">
                       {{ t('admin.iqTest.viewDetails') }}
@@ -114,7 +116,7 @@
                   </td>
                 </tr>
                 <tr v-if="expandedRuns.has(run.id)">
-                  <td colspan="11" class="bg-gray-50 px-3 py-3 dark:bg-dark-800/60">
+                  <td colspan="12" class="bg-gray-50 px-3 py-3 dark:bg-dark-800/60">
                     <p v-if="run.error_message" class="mb-2 text-sm text-red-600 dark:text-red-400">{{ run.error_message }}</p>
                     <div v-if="run.details?.length" class="space-y-2">
                       <div v-for="(d, idx) in run.details" :key="idx" class="rounded-lg border border-gray-200 bg-white p-3 text-sm dark:border-dark-700 dark:bg-dark-900">

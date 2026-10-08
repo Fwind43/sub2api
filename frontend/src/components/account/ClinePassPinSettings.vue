@@ -165,6 +165,64 @@
         </div>
       </div>
     </template>
+
+    <div class="rounded-lg border border-gray-200 p-3 dark:border-dark-600" data-testid="clinepass-lastknown">
+      <div class="flex items-center justify-between gap-4">
+        <div>
+          <label class="input-label mb-0">{{ t('admin.accounts.clinepassPin.lastKnownTitle') }}</label>
+          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            {{ t('admin.accounts.clinepassPin.lastKnownDesc') }}
+          </p>
+        </div>
+        <button
+          type="button"
+          class="btn btn-secondary btn-sm"
+          :disabled="lastKnownLoading"
+          data-testid="clinepass-lastknown-refresh"
+          @click="loadLastKnown"
+        >
+          {{ lastKnownLoading ? t('admin.accounts.clinepassPin.lastKnownLoading') : t('admin.accounts.clinepassPin.lastKnownRefresh') }}
+        </button>
+      </div>
+      <p v-if="lastKnownError" class="mt-2 text-xs text-red-600 dark:text-red-400" data-testid="clinepass-lastknown-error">
+        {{ lastKnownError }}
+      </p>
+      <p
+        v-if="!lastKnownLoading && !lastKnown.length && !lastKnownError"
+        class="mt-2 text-xs text-gray-500 dark:text-gray-400"
+      >
+        {{ t('admin.accounts.clinepassPin.lastKnownEmpty') }}
+      </p>
+      <div
+        v-for="item in lastKnown"
+        :key="item.model"
+        class="mt-2 rounded border border-gray-100 p-2 text-xs dark:border-dark-600"
+        data-testid="clinepass-lastknown-row"
+      >
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="font-medium text-gray-700 dark:text-gray-200">{{ item.model }}</span>
+          <span class="rounded bg-gray-100 px-1.5 py-0.5 text-gray-700 dark:bg-dark-600 dark:text-gray-200">
+            {{ item.provider }}
+          </span>
+          <span v-if="item.pipeline" class="text-gray-500 dark:text-gray-400">{{ pipelineLabel(item.pipeline) }}</span>
+          <span class="text-gray-400">{{ formatObserved(item.observed_at) }}</span>
+        </div>
+        <div class="mt-1 flex flex-wrap items-center gap-2">
+          <span class="text-gray-500 dark:text-gray-400">
+            {{ t('admin.accounts.clinepassPin.lastKnownExpected') }}:
+            {{ expectedForModel(item.model) || t('admin.accounts.clinepassPin.lastKnownNone') }}
+          </span>
+          <span
+            v-if="expectedForModel(item.model)"
+            :class="isMatch(item) ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'"
+            data-testid="clinepass-lastknown-verdict"
+          >
+            {{ isMatch(item) ? t('admin.accounts.clinepassPin.lastKnownMatch') : t('admin.accounts.clinepassPin.lastKnownMismatch') }}
+          </span>
+        </div>
+        <p v-if="item.fallbacks?.length" class="mt-1 text-gray-400">{{ item.fallbacks.join(', ') }}</p>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -172,7 +230,12 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Select from '@/components/common/Select.vue'
-import { probeUpstreams, type ClinePassUpstreamProbeResult } from '@/api/admin/clinepass'
+import {
+  listLastKnown,
+  probeUpstreams,
+  type ClinePassLastKnownItem,
+  type ClinePassUpstreamProbeResult
+} from '@/api/admin/clinepass'
 
 type PinMode = 'off' | 'strict' | 'preferred'
 type PinPipelines = 'both' | 'vercel' | 'openrouter'
@@ -225,6 +288,57 @@ const probeModel = ref('')
 const probing = ref(false)
 const probeResult = ref<ClinePassUpstreamProbeResult | null>(null)
 const probeError = ref('')
+
+const lastKnown = ref<ClinePassLastKnownItem[]>([])
+const lastKnownLoading = ref(false)
+const lastKnownError = ref('')
+
+const loadLastKnown = async () => {
+  if (!props.accountId) return
+  lastKnownLoading.value = true
+  lastKnownError.value = ''
+  try {
+    const res = await listLastKnown(props.accountId)
+    lastKnown.value = res?.items ?? []
+  } catch (error: unknown) {
+    lastKnown.value = []
+    lastKnownError.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    lastKnownLoading.value = false
+  }
+}
+
+watch(() => props.accountId, loadLastKnown, { immediate: true })
+
+const pipelineLabel = (pipeline: string): string => {
+  if (pipeline === 'planner') return t('admin.accounts.clinepassPin.lastKnownPipelinePlanner')
+  if (pipeline === 'direct') return t('admin.accounts.clinepassPin.lastKnownPipelineDirect')
+  return pipeline
+}
+
+const formatObserved = (value: string): string => {
+  if (!value) return ''
+  const ts = new Date(value)
+  return Number.isNaN(ts.getTime()) ? value : ts.toLocaleString()
+}
+
+// The pin the admin configured for a given model: a per-model override wins over
+// the account-level upstream; mode "off" means nothing is expected.
+const expectedForModel = (model: string): string => {
+  if (mode.value === 'off') return ''
+  const name = model.trim()
+  const row = modelRows.value.find((r) => r.model.trim() === name)
+  if (row && row.upstream.trim()) return row.upstream.trim()
+  return upstream.value.trim()
+}
+
+const isMatch = (item: ClinePassLastKnownItem): boolean => {
+  const expected = expectedForModel(item.model).toLowerCase()
+  if (!expected) return true
+  const actual = (item.provider || '').toLowerCase()
+  if (!actual) return false
+  return actual === expected || actual.startsWith(`${expected}/`) || expected.startsWith(`${actual}/`)
+}
 
 const readMode = (v: Record<string, unknown>): PinMode => {
   const m = typeof v.mode === 'string' ? v.mode : ''

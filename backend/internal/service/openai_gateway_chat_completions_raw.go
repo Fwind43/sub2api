@@ -325,6 +325,9 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 	pendingLines := make([]string, 0, 8)
 	refusalDetector := newOpenAIChatSilentRefusalDetector(requestBodyLen)
 	var terminal openAIRawStreamTerminalState
+	// clinepass: 透传流的同时抓取上游自报的“实际命中渠道”，用于 admin 展示。
+	captureClinePassRouting := account.Platform == PlatformClinePass
+	var lastClinePassRouting *ClinePassRouting
 
 	writeLine := func(line string) {
 		if clientDisconnected {
@@ -374,6 +377,11 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 					elapsed := int(time.Since(startTime).Milliseconds())
 					firstTokenMs = &elapsed
 				}
+				if captureClinePassRouting && strings.Contains(payload, "provider") {
+					if routing := ParseClinePassRouting([]byte(payload)); routing != nil {
+						lastClinePassRouting = routing
+					}
+				}
 			}
 		}
 		line = applyOllamaCloudRawChatCompletionsSSELine(account, line)
@@ -409,6 +417,10 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 			Duration:                      time.Since(startTime),
 			FirstTokenMs:                  firstTokenMs,
 		}
+	}
+
+	if captureClinePassRouting && lastClinePassRouting != nil {
+		s.RecordClinePassRouting(c.Request.Context(), account.ID, originalModel, lastClinePassRouting)
 	}
 
 	scanErr := scanner.Err()

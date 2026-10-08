@@ -77,6 +77,7 @@ var ProviderSet = wire.NewSet(
 	NewIQTestBankRepository,          // 智商测试题库仓储
 	NewIQTestPlanRepository,          // 智商测试计划仓储
 	NewIQTestRunRepository,           // 智商测试结果仓储
+	NewClinePassLastKnownRepository,  // clinepass 最近命中上游仓储
 	NewProxyRepository,
 	NewRedeemCodeRepository,
 	NewPromoCodeRepository,

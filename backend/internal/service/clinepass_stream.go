@@ -219,6 +219,9 @@ func (s *OpenAIGatewayService) bufferClinePassStream(
 	}
 
 	body := accumulator.build(upstreamModel, originalModel)
+	if routing := ParseClinePassRouting(body); routing != nil {
+		s.RecordClinePassRouting(c.Request.Context(), account.ID, originalModel, routing)
+	}
 	body = s.replaceModelInResponseBody(body, upstreamModel, originalModel)
 
 	if s.responseHeaderFilter != nil {

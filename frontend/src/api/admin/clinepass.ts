@@ -151,6 +151,28 @@ export async function probeUpstreams(
   return data
 }
 
+export interface ClinePassLastKnownItem {
+  model: string
+  provider: string
+  pipeline: string
+  canonical_slug?: string
+  fallbacks?: string[]
+  plan?: string
+  observed_at: string
+}
+
+export interface ClinePassLastKnownResponse {
+  account_id: number
+  items: ClinePassLastKnownItem[]
+}
+
+export async function listLastKnown(accountId: number): Promise<ClinePassLastKnownResponse> {
+  const { data } = await apiClient.get<ClinePassLastKnownResponse>(
+    `/admin/accounts/${accountId}/clinepass-lastknown`
+  )
+  return data
+}
+
 export default {
   getCapabilities,
   startDeviceAuth,

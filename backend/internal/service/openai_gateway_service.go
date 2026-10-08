@@ -508,6 +508,9 @@ type OpenAIGatewayService struct {
 	// 剥离跨账号回带（openai_codex_turn_state.go）。
 	openaiCodexTurnStateOrigins sync.Map
 	openaiCodexTurnStateWrites  atomic.Uint64
+
+	// clinePassLastKnown 记录 clinepass 账户/模型最近一次实际命中的上游渠道。
+	clinePassLastKnown ClinePassLastKnownStore
 }
 
 // NewOpenAIGatewayService creates a new OpenAIGatewayService

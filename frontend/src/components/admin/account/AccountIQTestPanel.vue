@@ -49,6 +49,10 @@
             {{ t('admin.iqTest.bank') }} #{{ plan.bank_id }} · {{ t('admin.iqTest.question') }} #{{ plan.question_id ?? '-' }} · cron {{ plan.cron_expression || '-' }} ·
             {{ plan.enabled ? t('admin.iqTest.enabled') : t('common.disabled') }}
           </span>
+          <span class="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-gray-500 dark:text-gray-400">
+            <span>{{ t('admin.iqTest.lastRun') }}: {{ plan.last_run_at ? formatDateTime(plan.last_run_at) : '-' }}</span>
+            <span>{{ t('admin.iqTest.nextRun') }}: {{ plan.next_run_at ? formatDateTime(plan.next_run_at) : '-' }}</span>
+          </span>
           <button class="btn btn-secondary text-sm" :disabled="running" @click="runPlan(plan)">{{ t('admin.iqTest.runNow') }}</button>
           <button class="btn btn-secondary text-sm" @click="openPlanForm(plan)">{{ t('common.edit') }}</button>
           <button class="btn btn-danger text-sm" @click="askRemovePlan(plan)">{{ t('common.delete') }}</button>
@@ -107,6 +111,10 @@
             <span class="text-gray-700 dark:text-gray-300">
               #{{ run.id }} · {{ t('admin.iqTest.bank') }} #{{ run.bank_id }} · {{ run.model_id || '-' }}
             </span>
+            <span class="text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.iqTest.startedAt') }}: {{ run.started_at ? formatDateTime(run.started_at) : '-' }}
+              <template v-if="run.finished_at"> · {{ t('admin.iqTest.finishedAt') }}: {{ formatDateTime(run.finished_at) }}</template>
+            </span>
             <span class="flex items-center gap-2">
               <span class="font-medium">{{ run.score }}</span>
               <span class="text-xs text-gray-500">{{ run.correct }}/{{ run.total }} · {{ run.latency_ms }} ms</span>
@@ -152,6 +160,7 @@ import Select from '@/components/common/Select.vue'
 import Toggle from '@/components/common/Toggle.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { REASONING_EFFORT_LEVELS } from '@/constants/channel'
+import { formatDateTime } from '@/utils/format'
 
 const props = defineProps<{
   show: boolean
