@@ -1395,7 +1395,7 @@ func (a *Account) GetOpenAIBaseURL() string {
 	if a != nil && a.Platform == PlatformClinePass {
 		return a.ClinePassBaseURL()
 	}
-	if !a.IsOpenAI() && !a.IsCNProvider() && !a.IsOpenCodeGo() {
+	if !a.IsOpenAI() && !a.IsCNProvider() && !a.IsOpenCodeGo() && !a.IsMultiProtocolAPIKey() {
 		return ""
 	}
 	if a.IsMultiProtocolAPIKey() && a.IsAdaptiveAPIProtocol() {

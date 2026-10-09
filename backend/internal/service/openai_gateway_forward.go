@@ -163,6 +163,15 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		return s.forwardResponsesViaRawChatCompletions(ctx, c, account, body)
 	}
 
+	// opencode_go 的不支持模型（gemini / jev 等）必须在任何转发分支之前统一拒绝：
+	// 下面的 anthropic 协议早退分支会直接转发到原生端点，守卫若只放在其后，
+	// anthropic 协议的 opencode_go 账号会绕过校验，把不支持的模型送到上游（502）。
+	if account.IsOpenCodeGo() {
+		if unsupported := upstreamRoutingModel(account, body, ""); IsOpenCodeUnsupportedModel(unsupported) {
+			return nil, writeOpenCodeUnsupportedModelError(c, false, unsupported)
+		}
+	}
+
 	// CN 供应商 anthropic 协议账号：/v1/responses 入站是交叉协议组合
 	// （Responses 客户端 × Anthropic 上游），转成 Anthropic 请求走原生端点。
 	// 不能落到下面的 raw-CC 分支——其 URL 构造会把 anthropic base 当 CC base 用。
@@ -189,10 +198,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 
 	// 上游协议统一由 resolveUpstreamProtocol 判定（按模型分流时带上游模型目录）。OpenAI API Key 账号只会落到
 	// Responses / Chat Completions，上面的归一化对两条路径都生效。
+	// opencode_go 的不支持模型已在上方主干入口（早于 anthropic 协议早退分支）统一拒绝，
+	// 这里不再重复判定；routingModel 仍用于下面的上游协议解析。
 	routingModel := upstreamRoutingModel(account, body, "")
-	if account.IsOpenCodeGo() && IsOpenCodeUnsupportedModel(routingModel) {
-		return nil, writeOpenCodeUnsupportedModelError(c, false, routingModel)
-	}
 	switch s.resolveUpstreamProtocolFor(ctx, account, APIProtocolResponses, routingModel) {
 	case APIProtocolAnthropic:
 		// Responses 客户端 × Anthropic 上游：转成 Anthropic 请求走原生端点。不能落到

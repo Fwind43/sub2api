@@ -46,6 +46,14 @@ func TestOpenCodeUnsupportedModelsRejectMappedAliasesBeforeProtocolSelection(t *
 
 func TestCommandCodeGeminiModelReachesUpstream(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	// fork 的 Command Code 走原生端点（/alpha/generate、/v1/responses），不使用上游 profile 的
+	// /provider/v1 中继端点；模型可达性（不被 OpenCode 不支持模型拦截）断言保持不变。
+	wantURL := map[string]string{
+		"chat":                 "https://api.commandcode.ai/alpha/generate",
+		"responses":            "https://api.commandcode.ai/alpha/generate",
+		"chat_responses_shape": "https://api.commandcode.ai/v1/responses",
+		"messages":             "https://api.commandcode.ai/v1/responses",
+	}
 	for _, ingress := range routingMatrixIngresses() {
 		t.Run(ingress.name, func(t *testing.T) {
 			account := commandCodeTestAccount(106)
@@ -62,7 +70,7 @@ func TestCommandCodeGeminiModelReachesUpstream(t *testing.T) {
 			require.Error(t, err)
 			require.NotContains(t, err.Error(), "opencode unsupported model")
 			require.Len(t, upstream.requests, 1)
-			require.Equal(t, "https://api.commandcode.ai/provider/v1/chat/completions", upstream.requests[0].URL.String())
+			require.Equal(t, wantURL[ingress.name], upstream.requests[0].URL.String(), ingress.name)
 		})
 	}
 	account := commandCodeTestAccount(107)

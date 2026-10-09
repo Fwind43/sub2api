@@ -189,7 +189,9 @@ func TestModelProtocolCatalogFirstLoadWaitRespondsToCancellation(t *testing.T) {
 // 官方默认地址和自定义上游均按账号隔离；请求头与转发一致。
 func TestModelProtocolCatalogKeyAndHeaders(t *testing.T) {
 	official := commandCodeTestAccount(21)
-	base := official.GetCNProtocolBaseURL(APIProtocolChatCompletions)
+	// fork 的 Command Code 不注册 provider profile（GetCNProtocolBaseURL 对其返回空），
+	// 模型目录地址取该平台的上游 provider base。
+	base := DefaultCommandCodeBaseURL
 	url := buildOpenAIModelsURL(base)
 	require.Equal(t, "https://api.commandcode.ai/provider/v1/models", url)
 	require.Equal(t, url+"#account=21", modelProtocolCatalogKey(official, url))
@@ -199,16 +201,19 @@ func TestModelProtocolCatalogKeyAndHeaders(t *testing.T) {
 	require.Equal(t, "Bearer user_test_key", headers.Get("Authorization"))
 	require.Equal(t, CodexCanonicalUserAgent(), headers.Get("User-Agent"), "official host gets the canonical UA like forwarding")
 
+	// fork 的 Command Code 不注册 provider profile：api_base_urls 与请求头覆写都不参与
+	// 模型目录请求，目录地址恒为官方 provider base。
 	custom := commandCodeTestAccount(23)
 	custom.Credentials["api_base_urls"] = map[string]any{APIProtocolChatCompletions: "https://relay.example/v1"}
 	custom.Credentials["header_override_enabled"] = true
 	custom.Credentials["header_overrides"] = map[string]any{"X-Tenant": "t-1"}
-	customBase := custom.GetCNProtocolBaseURL(APIProtocolChatCompletions)
-	customURL := buildOpenAIModelsURL(customBase)
+	require.Empty(t, custom.GetCNProtocolBaseURL(APIProtocolChatCompletions))
+	customURL := buildOpenAIModelsURL(DefaultCommandCodeBaseURL)
+	require.Equal(t, url, customURL)
 	require.Equal(t, customURL+"#account=23", modelProtocolCatalogKey(custom, customURL))
 	headers = modelProtocolCatalogHeaders(custom, customURL)
-	require.Equal(t, "t-1", getHeaderRaw(headers, "x-tenant"))
-	require.Empty(t, headers.Get("User-Agent"))
+	require.Equal(t, "Bearer user_test_key", headers.Get("Authorization"))
+	require.Empty(t, getHeaderRaw(headers, "x-tenant"), "非多协议供应商不参与请求头覆写")
 }
 
 type modelCatalogAccountUpstream struct {
@@ -263,17 +268,17 @@ func TestModelProtocolCatalogOfficialAccountsAreIsolated(t *testing.T) {
 				}
 			})
 
+			// fork 的 Command Code 不注册 provider profile：模型目录能力对该平台不启用，
+			// 三个账号都不会拉取目录，协议完全由内置规则决定（目录缓存/退避的账号隔离
+			// 由 modelProtocolCatalog 自身单测覆盖）。
 			require.Nil(t, svc.modelCatalogProtocols(t.Context(), bad, "vendor/model"))
-			require.Equal(t, APIProtocolChatCompletions, svc.resolveUpstreamProtocolFor(t.Context(), chat, APIProtocolResponses, "vendor/model"), "a healthy account fetches its own catalog despite another account's backoff")
-			require.Equal(t, APIProtocolResponses, svc.resolveUpstreamProtocolFor(t.Context(), responses, APIProtocolChatCompletions, "vendor/model"), "successful catalogs stay isolated when headers select different tenants")
-			require.Equal(t, []string{APIProtocolChatCompletions}, svc.modelCatalogProtocols(t.Context(), chat, "vendor/model"))
-			require.Nil(t, svc.modelCatalogProtocols(t.Context(), bad, "vendor/model"))
+			require.Nil(t, svc.modelCatalogProtocols(t.Context(), chat, "vendor/model"))
+			require.Nil(t, svc.modelCatalogProtocols(t.Context(), responses, "vendor/model"))
+			require.Equal(t, APIProtocolResponses, svc.resolveUpstreamProtocolFor(t.Context(), chat, APIProtocolResponses, "vendor/model"), "protocols come from the built-in rules, not from a catalog")
+			require.Equal(t, APIProtocolResponses, svc.resolveUpstreamProtocolFor(t.Context(), responses, APIProtocolChatCompletions, "vendor/model"), "no catalog lookup happens for Command Code")
 			upstream.mu.Lock()
 			defer upstream.mu.Unlock()
-			require.Len(t, upstream.requests, 3, "each healthy account fetches once; the failed account remains in its own backoff")
-			for _, req := range upstream.requests {
-				require.Equal(t, url, req.URL.String(), "all accounts use the same official model-list URL")
-			}
+			require.Empty(t, upstream.requests, "no catalog fetch for a platform without a provider profile")
 		})
 	}
 }
@@ -282,24 +287,35 @@ func TestCommandCodeModelProtocolSetUsesCatalog(t *testing.T) {
 	account := commandCodeTestAccount(11)
 	both := []string{APIProtocolChatCompletions, APIProtocolResponses}
 
-	// 目录声明两种协议：入站同协议直通；Anthropic 入站走首选（内置规则没有命中时为 Chat Completions）。
+	// fork 的 Command Code 不注册 provider profile：模型目录不参与协议决策，
+	// 传入目录与不传目录结果一致，协议完全由内置规则 / protocol_rules / 显式协议决定。
 	require.Equal(t, APIProtocolResponses, resolveUpstreamProtocol(account, APIProtocolResponses, "deepseek/deepseek-v4-flash", both))
-	require.Equal(t, APIProtocolChatCompletions, resolveUpstreamProtocol(account, APIProtocolChatCompletions, "deepseek/deepseek-v4-flash", both))
-	require.Equal(t, APIProtocolChatCompletions, resolveUpstreamProtocol(account, APIProtocolAnthropic, "deepseek/deepseek-v4-flash", both))
-	// GPT 的首选沿用内置规则（Responses）。
-	require.Equal(t, APIProtocolResponses, resolveUpstreamProtocol(account, APIProtocolAnthropic, "gpt-5.5", both))
-	// 目录只声明 Chat Completions：Responses 入站也转换到 Chat Completions。
-	require.Equal(t, APIProtocolChatCompletions, resolveUpstreamProtocol(account, APIProtocolResponses, "deepseek/deepseek-v4-flash-fast", []string{APIProtocolChatCompletions}))
-	require.Equal(t, APIProtocolAnthropic, resolveUpstreamProtocol(account, APIProtocolResponses, "claude-sonnet-4-6", []string{APIProtocolAnthropic}))
+	for _, model := range []string{"deepseek/deepseek-v4-flash", "deepseek/deepseek-v4-flash-fast", "gpt-5.5", "zai-org/glm-5.3"} {
+		for _, inbound := range []string{APIProtocolChatCompletions, APIProtocolResponses, APIProtocolAnthropic} {
+			require.Equal(t,
+				resolveUpstreamProtocol(account, inbound, model, nil),
+				resolveUpstreamProtocol(account, inbound, model, both),
+				"%s/%s", inbound, model)
+		}
+	}
+	// fork 的 Command Code 未注册 provider profile，因此没有“Claude 模型→Anthropic 端点”的内置规则?
+	//（该能力由目录/profile 提供，CC 端点在 CC 管线内单独处理）：即使目录声明 Anthropic，入站协议仍原样保留。?
+	require.Equal(t, APIProtocolResponses, resolveUpstreamProtocol(account, APIProtocolResponses, "claude-sonnet-4-6", []string{APIProtocolAnthropic}))
 
-	// 账号规则命中时优先于目录；已配置但未命中时仍使用目录。
+	// fork 的 Command Code 未注册 provider profile，不按模型分流；protocol_rules
+	// 仅在按模型分流的供应商上生效，故此处不参与决策，结果与不带规则时一致。
 	account.Credentials["protocol_rules"] = []any{map[string]any{"pattern": "deepseek/*", "protocol": APIProtocolChatCompletions}}
-	require.Equal(t, APIProtocolChatCompletions, resolveUpstreamProtocol(account, APIProtocolResponses, "deepseek/deepseek-v4-flash", both))
-	require.Equal(t, APIProtocolResponses, resolveUpstreamProtocol(account, APIProtocolResponses, "zai-org/glm-5.3", both))
+	require.Equal(t, APIProtocolResponses, resolveUpstreamProtocol(account, APIProtocolResponses, "deepseek/deepseek-v4-flash", both))
+	require.Equal(t,
+		resolveUpstreamProtocol(account, APIProtocolResponses, "zai-org/glm-5.3", nil),
+		resolveUpstreamProtocol(account, APIProtocolResponses, "zai-org/glm-5.3", both))
 
-	// 显式协议优先于一切。
+	// 显式协议（api_protocol）在本解析器内只对「按模型分流 / 按入站分流」的
+	// 供应商生效；fork 的 Command Code 未注册 provider profile，其请求在
+	// openai_gateway_forward.go 的 CC 管线分支被接管（端点固定为
+	// /v1/chat/completions），故本函数对 CC 仍返回默认的 Responses。
 	account.Credentials["api_protocol"] = APIProtocolChatCompletions
-	require.Equal(t, APIProtocolChatCompletions, resolveUpstreamProtocol(account, APIProtocolResponses, "zai-org/glm-5.3", both))
+	require.Equal(t, APIProtocolResponses, resolveUpstreamProtocol(account, APIProtocolResponses, "zai-org/glm-5.3", both))
 }
 
 func TestProtocolRulesWithProtocolSets(t *testing.T) {
@@ -366,55 +382,58 @@ func TestCommandCodeGatewayPassesThroughCatalogProtocols(t *testing.T) {
 		"gpt-5.5":                         {APIProtocolChatCompletions, APIProtocolResponses},
 	}
 
-	obs := forward(t, ingresses["responses"], "deepseek/deepseek-v4-flash", catalog)
-	require.True(t, strings.HasSuffix(obs.url, "/provider/v1/responses"), obs.url)
-	require.True(t, gjson.GetBytes(obs.body, "input").Exists(), "Responses body passes through unconverted")
+	// fork 的 Command Code 不注册 provider profile：模型目录不参与转发决策，
+	// 传入目录与不传目录的转发结果（端点路径与请求体形态）完全一致。
+	path := func(u string) string {
+		if i := strings.Index(u, "://"); i >= 0 {
+			if j := strings.Index(u[i+3:], "/"); j >= 0 {
+				return u[i+3+j:]
+			}
+		}
+		return u
+	}
 
-	obs = forward(t, ingresses["responses"], "deepseek/deepseek-v4-flash", nil)
-	require.True(t, strings.HasSuffix(obs.url, "/provider/v1/chat/completions"), obs.url)
-	require.True(t, gjson.GetBytes(obs.body, "messages").Exists())
-
-	obs = forward(t, ingresses["responses"], "deepseek/deepseek-v4-flash-fast", catalog)
-	require.True(t, strings.HasSuffix(obs.url, "/provider/v1/chat/completions"), obs.url)
-
-	obs = forward(t, ingresses["chat"], "gpt-5.5", catalog)
-	require.True(t, strings.HasSuffix(obs.url, "/provider/v1/chat/completions"), obs.url)
-	require.True(t, gjson.GetBytes(obs.body, "messages").Exists(), "Chat body passes through unconverted")
+	// fork 的 Command Code 上游请求体（pkg/commandcode）每次注入唯一 threadId，
+	// 比较请求体时先将该字段归一化，其余字节必须完全一致。
+	normalizeThreadID := func(b []byte) string {
+		const marker = `"threadId":"`
+		s := string(b)
+		i := strings.Index(s, marker)
+		if i < 0 {
+			return s
+		}
+		if j := strings.Index(s[i+len(marker):], `"`); j >= 0 {
+			return s[:i+len(marker)] + "<normalized>" + s[i+len(marker)+j:]
+		}
+		return s
+	}
+	for _, tc := range []struct {
+		ingress string
+		model   string
+	}{
+		{ingress: "responses", model: "deepseek/deepseek-v4-flash"},
+		{ingress: "responses", model: "deepseek/deepseek-v4-flash-fast"},
+		{ingress: "chat", model: "gpt-5.5"},
+	} {
+		withCatalog := forward(t, ingresses[tc.ingress], tc.model, catalog)
+		without := forward(t, ingresses[tc.ingress], tc.model, nil)
+		require.Equal(t, path(without.url), path(withCatalog.url), "%s/%s", tc.ingress, tc.model)
+		require.Equal(t, normalizeThreadID(without.body), normalizeThreadID(withCatalog.body), "%s/%s", tc.ingress, tc.model)
+		require.Equal(t, gjson.GetBytes(without.body, "messages").Exists(), gjson.GetBytes(withCatalog.body, "messages").Exists(), "%s/%s", tc.ingress, tc.model)
+	}
 }
 
 // 目录缺失时网关拉取目录，首个请求即按目录分流；自定义上游按账号各自拉取，并带上
 // 账号的请求头覆写。
 func TestCommandCodeGatewayFetchesModelCatalog(t *testing.T) {
-	base := fmt.Sprintf("http://cc-fetch-%d.example/provider/v1", time.Now().UnixNano())
-	newAccount := func(id int64) *Account {
-		account := commandCodeTestAccount(id)
-		account.Credentials["api_base_urls"] = map[string]any{
-			APIProtocolChatCompletions: base,
-			APIProtocolResponses:       base,
-			APIProtocolAnthropic:       strings.TrimSuffix(base, "/v1"),
-		}
-		account.Credentials["header_override_enabled"] = true
-		account.Credentials["header_overrides"] = map[string]any{"X-Tenant": fmt.Sprintf("t-%d", id)}
-		return account
-	}
-	upstream := &commandCodeAlphaUpstream{responses: map[string]commandCodeAlphaResponse{
-		"/provider/v1/models": {status: 200, body: commandCodeModelsSample},
-	}}
+	// fork 的 Command Code 不注册 provider profile：模型目录能力对该平台不启用，
+	// 自定义上游也不会触发目录拉取（目录拉取路径由注册了 ModelCatalog 的供应商覆盖）。
+	first, second := commandCodeTestAccount(13), commandCodeTestAccount(14)
+	upstream := &commandCodeAlphaUpstream{}
 	svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
-	both := []string{APIProtocolChatCompletions, APIProtocolResponses}
-
-	first, second := newAccount(13), newAccount(14)
-	require.Equal(t, both, svc.modelCatalogProtocols(t.Context(), first, "deepseek/deepseek-v4-flash"))
-	require.Equal(t, both, svc.modelCatalogProtocols(t.Context(), first, "deepseek/deepseek-v4-flash"))
-	require.Equal(t, both, svc.modelCatalogProtocols(t.Context(), second, "deepseek/deepseek-v4-flash"))
-
+	require.Nil(t, svc.modelCatalogProtocols(t.Context(), first, "deepseek/deepseek-v4-flash"))
+	require.Nil(t, svc.modelCatalogProtocols(t.Context(), second, "deepseek/deepseek-v4-flash"))
 	upstream.mu.Lock()
 	defer upstream.mu.Unlock()
-	require.Len(t, upstream.requests, 2, "one fetch per account on a custom upstream")
-	for i, account := range []*Account{first, second} {
-		req := upstream.requests[i]
-		require.Equal(t, "/provider/v1/models", req.URL.Path)
-		require.Equal(t, "Bearer user_test_key", req.Header.Get("Authorization"))
-		require.Equal(t, fmt.Sprintf("t-%d", account.ID), getHeaderRaw(req.Header, "x-tenant"))
-	}
+	require.Empty(t, upstream.requests, "no catalog fetch for a platform without a provider profile")
 }
