@@ -1,3 +1,5 @@
+import { getProviderProfile } from '@/constants/platformCatalog'
+
 // =====================
 // 模型列表（硬编码，与 new-api 一致）
 // =====================
@@ -484,7 +486,10 @@ export function getModelsByPlatform(platform: string): string[] {
     case 'perplexity': return perplexityModels
     // ClinePass 模型由上游动态返回（账号 models API），静态表置空，选择器会动态拉取
     case 'clinepass': return []
-    default: return claudeModels
+    default:
+      // 平台清单中没有内置模型列表的多协议供应商（多为多模型聚合平台，模型多且常变）
+      // 默认不预填白名单：预填 Claude 模型会让新账号只接受这些模型。
+      return getProviderProfile(platform) ? [] : claudeModels
   }
 }
 

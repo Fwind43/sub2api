@@ -62,9 +62,13 @@ type CNProviderQuotaProbeResult struct {
 	FetchedAt       int64         `json:"fetched_at"`
 	Persisted       bool          `json:"persisted"`
 	Error           string        `json:"error,omitempty"`
+
+	// Balance 为同一次探测得到的余额（Command Code 积分与窗口同源），其余供应商为空。
+	Balance *CNProviderBalanceResult `json:"balance,omitempty"`
 }
 
-// CNProviderQuotaService 探测 Kimi / Zhipu Coding Plan 的滚动窗口用量。
+// CNProviderQuotaService 探测 Kimi / Zhipu / MiniMax Coding Plan、OpenCode Go、
+// Command Code 与 Cline（ClinePass）的滚动窗口用量。
 type CNProviderQuotaService struct {
 	accountRepo  AccountRepository
 	proxyRepo    ProxyRepository
