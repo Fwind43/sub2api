@@ -4440,6 +4440,8 @@
 
         <!-- Tab: Gateway — Claude Code, Scheduling -->
         <div v-show="activeTab === 'gateway'" class="space-y-6">
+          <!-- ClinePass Platform-level Upstream Pin -->
+          <ClinePassUpstreamPinCard />
           <!-- Claude Code Settings -->
           <div class="card">
             <div
@@ -9033,6 +9035,7 @@ import ImageUpload from "@/components/common/ImageUpload.vue";
 import BackupSettings from "@/views/admin/BackupView.vue";
 import EmailTemplateEditor from "@/views/admin/settings/EmailTemplateEditor.vue";
 import RechargeBonusTierEditor from "@/components/admin/settings/RechargeBonusTierEditor.vue";
+import ClinePassUpstreamPinCard from "@/components/admin/ClinePassUpstreamPinCard.vue";
 import {
   normalizeRechargeBonusMode,
   normalizeRechargeBonusTiers,

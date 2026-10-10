@@ -203,7 +203,7 @@ func (s *OpenAIGatewayService) sendClinePassRequest(
 	}
 	// 上游钉住（cline-pass-switcher 移植）：把账号配置的路由意图注入出站
 	// body。无配置时原样透传，失败时 fail-open 返回未注入的 body。
-	upstreamBody = ApplyClinePassUpstreamPin(account, upstreamBody)
+	upstreamBody = ApplyClinePassUpstreamPinWithPlatform(account, s.clinePassPlatformUpstreamPin(ctx), upstreamBody)
 	targetURL := account.ClinePassChatCompletionsURL()
 
 	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)

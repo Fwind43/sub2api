@@ -182,3 +182,33 @@ export default {
   refreshAccount,
   listModels
 }
+
+
+export interface ClinePassUpstreamPinConfig {
+  mode?: '' | 'off' | 'strict' | 'preferred'
+  upstream?: string
+  upstreams?: string[]
+  order?: string[]
+  only?: string[]
+  exclude?: string[]
+  sort?: string
+  pipelines?: '' | 'both' | 'vercel' | 'openrouter'
+  match_prefixes?: string[]
+  models?: Record<string, Partial<ClinePassUpstreamPinConfig>>
+}
+
+export interface ClinePassUpstreamPinResponse {
+  config: ClinePassUpstreamPinConfig | null
+}
+
+export async function getUpstreamPin(): Promise<ClinePassUpstreamPinResponse> {
+  const { data } = await apiClient.get<ClinePassUpstreamPinResponse>(`${CLINEPASS_BASE}/upstream-pin`)
+  return (data ?? { config: null }) as ClinePassUpstreamPinResponse
+}
+
+export async function updateUpstreamPin(
+  payload: ClinePassUpstreamPinConfig
+): Promise<ClinePassUpstreamPinResponse> {
+  const { data } = await apiClient.put<ClinePassUpstreamPinResponse>(`${CLINEPASS_BASE}/upstream-pin`, payload)
+  return (data ?? { config: null }) as ClinePassUpstreamPinResponse
+}

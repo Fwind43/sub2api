@@ -569,6 +569,9 @@ const (
 	// SettingKeyUpstreamBillingProbeSettings stores the global enable switch and interval
 	// for probing remote Sub2API API-key billing metadata.
 	SettingKeyUpstreamBillingProbeSettings = "upstream_billing_probe_settings"
+	// SettingKeyClinePassUpstreamPinSettings stores the platform-level upstream pin
+	// for all clinepass accounts (JSON, see ClinePassUpstreamPinConfig).
+	SettingKeyClinePassUpstreamPinSettings = "clinepass_upstream_pin_settings"
 
 	// SettingKeyOllamaCloudUsageSettings stores the opt-in global runner switch and interval.
 	SettingKeyOllamaCloudUsageSettings = "ollama_cloud_usage_settings"

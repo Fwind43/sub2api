@@ -27,6 +27,7 @@ import (
 //	  "upstreams": ["a","b","c"],    // known provider slugs (probe result)
 //	  "sort": "cost",                // cost | ttft | tps
 //	  "pipelines": "both",           // both | vercel | openrouter
+//	  "match_prefixes": ["deepseek"],// only pin models whose bare id starts so
 //	  "models": {                    // per-model overrides (bare or prefixed id)
 //	    "deepseek-v4-pro": { "upstream": "morph" }
 //	  }
@@ -36,15 +37,18 @@ const ClinePassUpstreamPinExtraKey = "clinepass_upstream_pin"
 // ClinePassUpstreamPinConfig mirrors the pin configuration. Zero values mean
 // "not set"; model-level overrides replace top-level fields when non-zero.
 type ClinePassUpstreamPinConfig struct {
-	Mode      string                                `json:"mode"`
-	Upstream  string                                `json:"upstream"`
-	Order     []string                              `json:"order"`
-	Only      []string                              `json:"only"`
-	Exclude   []string                              `json:"exclude"`
-	Upstreams []string                              `json:"upstreams"`
-	Sort      string                                `json:"sort"`
-	Pipelines string                                `json:"pipelines"`
-	Models    map[string]ClinePassUpstreamPinConfig `json:"models"`
+	Mode      string   `json:"mode"`
+	Upstream  string   `json:"upstream"`
+	Order     []string `json:"order"`
+	Only      []string `json:"only"`
+	Exclude   []string `json:"exclude"`
+	Upstreams []string `json:"upstreams"`
+	Sort      string   `json:"sort"`
+	Pipelines string   `json:"pipelines"`
+	// MatchPrefixes restricts the pin to models whose bare id (the segment after
+	// the last "/") starts with one of these prefixes. Empty means every model.
+	MatchPrefixes []string                              `json:"match_prefixes"`
+	Models        map[string]ClinePassUpstreamPinConfig `json:"models"`
 }
 
 // clinePassSortAliases maps the switcher's sort keys to the OpenRouter
@@ -112,6 +116,7 @@ func (c *ClinePassUpstreamPinConfig) normalize() *ClinePassUpstreamPinConfig {
 	c.Only = clinePassPinDedupe(c.Only)
 	c.Exclude = clinePassPinDedupe(c.Exclude)
 	c.Upstreams = clinePassPinDedupe(c.Upstreams)
+	c.MatchPrefixes = clinePassPinDedupeLower(c.MatchPrefixes)
 
 	if c.Mode == "off" {
 		return nil
@@ -127,6 +132,153 @@ func (c *ClinePassUpstreamPinConfig) normalize() *ClinePassUpstreamPinConfig {
 		c.Pipelines = ""
 	}
 	return c
+}
+
+// clinePassPinNeverPinnedPrefixes lists model families that must never be
+// pinned: free/relay-managed models keep their default upstream routing
+// (mirrors the magpie pin gate).
+var clinePassPinNeverPinnedPrefixes = []string{"cline-free"}
+
+// clinePassModelBasename lowercases a model id and drops the vendor prefix:
+// "cline-pass/deepseek-v4-pro" -> "deepseek-v4-pro".
+func clinePassModelBasename(model string) string {
+	base := strings.ToLower(strings.TrimSpace(model))
+	if idx := strings.LastIndex(base, "/"); idx >= 0 {
+		base = base[idx+1:]
+	}
+	return base
+}
+
+// MatchesModel reports whether the pin applies to the given outbound model id.
+// Models whose bare id starts with a never-pinned prefix (cline-free/) are
+// always left untouched; when MatchPrefixes is empty every other model matches.
+func (c *ClinePassUpstreamPinConfig) MatchesModel(model string) bool {
+	if c == nil {
+		return false
+	}
+	id := strings.ToLower(strings.TrimSpace(model))
+	base := clinePassModelBasename(id)
+	for _, prefix := range clinePassPinNeverPinnedPrefixes {
+		if strings.HasPrefix(id, prefix) || strings.HasPrefix(base, prefix) {
+			return false
+		}
+	}
+	if len(c.MatchPrefixes) == 0 {
+		return true
+	}
+	for _, prefix := range c.MatchPrefixes {
+		prefix = strings.ToLower(strings.TrimSpace(prefix))
+		if prefix != "" && strings.HasPrefix(base, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// ClinePassUpstreamPinDisabled reports whether the account explicitly turns the
+// pin off ("mode":"off"). Such accounts keep the pre-platform-level behaviour
+// even when a platform-level pin is configured.
+func ClinePassUpstreamPinDisabled(extra map[string]any) bool {
+	if len(extra) == 0 {
+		return false
+	}
+	raw, ok := extra[ClinePassUpstreamPinExtraKey]
+	if !ok || raw == nil {
+		return false
+	}
+	cfg, err := decodeClinePassUpstreamPin(raw)
+	if err != nil || cfg == nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(cfg.Mode), "off")
+}
+
+// MergeClinePassUpstreamPin layers an account-level pin over the platform-level
+// default: non-zero account fields win, platform fields fill the gaps.
+func MergeClinePassUpstreamPin(platform, account *ClinePassUpstreamPinConfig) *ClinePassUpstreamPinConfig {
+	if platform == nil {
+		return account
+	}
+	if account == nil {
+		return platform
+	}
+	merged := *platform
+	if account.Mode != "" {
+		merged.Mode = account.Mode
+	}
+	if account.Upstream != "" {
+		merged.Upstream = account.Upstream
+	}
+	if len(account.Order) > 0 {
+		merged.Order = account.Order
+	}
+	if len(account.Only) > 0 {
+		merged.Only = account.Only
+	}
+	if len(account.Exclude) > 0 {
+		merged.Exclude = account.Exclude
+	}
+	if len(account.Upstreams) > 0 {
+		merged.Upstreams = account.Upstreams
+	}
+	if account.Sort != "" {
+		merged.Sort = account.Sort
+	}
+	if account.Pipelines != "" {
+		merged.Pipelines = account.Pipelines
+	}
+	if len(account.MatchPrefixes) > 0 {
+		merged.MatchPrefixes = account.MatchPrefixes
+	}
+	if len(account.Models) > 0 {
+		models := make(map[string]ClinePassUpstreamPinConfig, len(platform.Models)+len(account.Models))
+		for key, value := range platform.Models {
+			models[key] = value
+		}
+		for key, value := range account.Models {
+			models[key] = value
+		}
+		merged.Models = models
+	}
+	return &merged
+}
+
+// ParseClinePassUpstreamPinJSON decodes a platform-level pin configuration
+// stored as a settings JSON string. Empty input yields nil (no pin).
+func ParseClinePassUpstreamPinJSON(raw string) (*ClinePassUpstreamPinConfig, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil, nil
+	}
+	var cfg ClinePassUpstreamPinConfig
+	if err := json.Unmarshal([]byte(trimmed), &cfg); err != nil {
+		return nil, fmt.Errorf("clinepass pin: invalid settings: %w", err)
+	}
+	return cfg.normalize(), nil
+}
+
+// clinePassPinDedupeLower trims/lowercases prefix entries and drops blanks.
+func clinePassPinDedupeLower(list []string) []string {
+	if len(list) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(list))
+	out := make([]string, 0, len(list))
+	for _, item := range list {
+		item = strings.ToLower(strings.TrimSpace(item))
+		if item == "" {
+			continue
+		}
+		if _, ok := seen[item]; ok {
+			continue
+		}
+		seen[item] = struct{}{}
+		out = append(out, item)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // effectiveForModel merges a per-model override over the top-level fields.
@@ -198,10 +350,21 @@ func (c *ClinePassUpstreamPinConfig) effectiveForModel(model string) *ClinePassU
 // outbound body. It is fail-open: when no configuration exists, or injection
 // fails, the original body is returned unchanged.
 func ApplyClinePassUpstreamPin(account *Account, body []byte) []byte {
+	return ApplyClinePassUpstreamPinWithPlatform(account, nil, body)
+}
+
+// ApplyClinePassUpstreamPinWithPlatform injects the effective pin configuration
+// (account-level overriding the platform-level default) into the outbound body.
+// It is fail-open: when no configuration exists, or injection fails, the
+// original body is returned unchanged.
+func ApplyClinePassUpstreamPinWithPlatform(account *Account, platform *ClinePassUpstreamPinConfig, body []byte) []byte {
 	if account == nil || len(body) == 0 {
 		return body
 	}
-	cfg := ParseClinePassUpstreamPin(account.Extra)
+	if ClinePassUpstreamPinDisabled(account.Extra) {
+		return body
+	}
+	cfg := MergeClinePassUpstreamPin(platform, ParseClinePassUpstreamPin(account.Extra))
 	if cfg == nil {
 		return body
 	}
@@ -217,6 +380,9 @@ func applyClinePassUpstreamPinToBody(body []byte, cfg *ClinePassUpstreamPinConfi
 	model := strings.TrimSpace(gjson.GetBytes(body, "model").String())
 	eff := cfg.effectiveForModel(model)
 	if eff == nil || eff.Mode == "off" {
+		return body, nil
+	}
+	if !eff.MatchesModel(model) {
 		return body, nil
 	}
 

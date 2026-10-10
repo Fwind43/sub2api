@@ -15,15 +15,18 @@ import (
 type ClinePassOAuthHandler struct {
 	clinePassOAuthService *service.ClinePassOAuthService
 	adminService          service.AdminService
+	settingService        *service.SettingService
 }
 
 func NewClinePassOAuthHandler(
 	clinePassOAuthService *service.ClinePassOAuthService,
 	adminService service.AdminService,
+	settingService *service.SettingService,
 ) *ClinePassOAuthHandler {
 	return &ClinePassOAuthHandler{
 		clinePassOAuthService: clinePassOAuthService,
 		adminService:          adminService,
+		settingService:        settingService,
 	}
 }
 
@@ -194,9 +197,9 @@ func (h *ClinePassOAuthHandler) RefreshAccountToken(c *gin.Context) {
 }
 
 type clinePassModelsRequest struct {
-	AccessToken string `json:"access_token"`
+	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
-	ProxyID     *int64 `json:"proxy_id"`
+	ProxyID      *int64 `json:"proxy_id"`
 }
 
 // ListModels proxies the upstream model catalog using a supplied or resolved

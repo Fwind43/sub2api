@@ -507,6 +507,9 @@ func registerClinePassOAuthRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		clinepass.POST("/oauth/refresh-token", h.Admin.ClinePassOAuth.RefreshToken)
 		clinepass.POST("/oauth/models", h.Admin.ClinePassOAuth.ListModels)
 		clinepass.POST("/accounts/:id/refresh", h.Admin.ClinePassOAuth.RefreshAccountToken)
+		// 平台级上游钉定（作用于所有 clinepass 账号；账号级 extra.clinepass_upstream_pin 优先）
+		clinepass.GET("/upstream-pin", h.Admin.ClinePassOAuth.GetClinePassUpstreamPin)
+		clinepass.PUT("/upstream-pin", h.Admin.ClinePassOAuth.UpdateClinePassUpstreamPin)
 	}
 }
 
