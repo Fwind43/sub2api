@@ -546,7 +546,7 @@ export interface CNUsageCellAccount {
 // Command Code、Cline 的积分与用量接口只查官方主机上的 API Key 账号（与后端
 // commandCodeUsageSupported / clineAccountAPISupported 一致）：自定义中转的 Key 不发往
 // 官方接口，后端直接拒绝探测，单元格只会显示一行报错。
-const OFFICIAL_ACCOUNT_API_PLATFORMS = ['command_code', 'cline']
+const OFFICIAL_ACCOUNT_API_PLATFORMS = ['commandcode', 'clinepass']
 
 function cnUsageCellAccountMode(account: CNUsageCellAccount): string {
   const mode = account.credentials?.account_mode

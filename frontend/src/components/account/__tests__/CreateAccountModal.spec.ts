@@ -668,14 +668,14 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     await wrapper.get('[data-testid="platform-button-cline"]').trigger('click')
     // 积分与 ClinePass 共用同一个 Key，按模型计费，不需要选择账号类型。
     expect(wrapper.find('[data-testid="generic-account-mode"]').exists()).toBe(false)
-    await wrapper.get('form#create-account-form input[type="text"]').setValue('cline')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('clinepass')
     await wrapper.get('form#create-account-form input[type="password"]').setValue('sk-cline')
 
     await wrapper.get('form#create-account-form').trigger('submit.prevent')
     await flushPromises()
 
     const payload = createAccountMock.mock.calls[0]?.[0]
-    expect(payload?.platform).toBe('cline')
+    expect(payload?.platform).toBe('clinepass')
     expect(payload?.credentials).toMatchObject({
       account_mode: 'payg',
       api_protocol: 'adaptive',

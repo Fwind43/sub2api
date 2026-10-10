@@ -58,15 +58,15 @@ const legacyZenRules = [
 ]
 
 function legacyIsMultiProtocol(platform: string): boolean {
-  return ['kimi', 'zhipu', 'deepseek', 'minimax', 'opencode_go', 'command_code', 'cline'].includes(platform)
+  return ['kimi', 'zhipu', 'deepseek', 'minimax', 'opencode_go', 'commandcode', 'clinepass'].includes(platform)
 }
 
 function legacySupportsResponses(platform: string): boolean {
-  return ['deepseek', 'kimi', 'minimax', 'opencode_go', 'command_code'].includes(platform)
+  return ['deepseek', 'kimi', 'minimax', 'opencode_go', 'commandcode'].includes(platform)
 }
 
 function legacyHeaderOverride(platform: string, type: string): boolean {
-  if (['anthropic', 'openai', 'kimi', 'zhipu', 'deepseek', 'minimax', 'opencode_go', 'command_code', 'cline'].includes(platform)) {
+  if (['anthropic', 'openai', 'kimi', 'zhipu', 'deepseek', 'minimax', 'opencode_go', 'commandcode', 'clinepass'].includes(platform)) {
     return type === 'apikey'
   }
   if (platform === 'grok') return type === 'apikey' || type === 'oauth'
@@ -192,24 +192,24 @@ describe('credentialsBuilder derives multi-protocol data from the platform catal
 
 describe('credentialsBuilder built-in Command Code provider', () => {
   it('uses the Command Code endpoints and routes Claude / GPT by model', () => {
-    expect(isMultiProtocolApiKeyPlatform('command_code')).toBe(true)
-    expect(providerRoutesByModel('command_code')).toBe(true)
-    expect(providerAccountModes('command_code')).toEqual(['payg'])
-    expect(defaultCNAdaptiveBaseUrls('command_code', 'payg')).toEqual({
+    expect(isMultiProtocolApiKeyPlatform('commandcode')).toBe(true)
+    expect(providerRoutesByModel('commandcode')).toBe(true)
+    expect(providerAccountModes('commandcode')).toEqual(['payg'])
+    expect(defaultCNAdaptiveBaseUrls('commandcode', 'payg')).toEqual({
       chat_completions: 'https://api.commandcode.ai/provider/v1',
       anthropic: 'https://api.commandcode.ai/provider',
       responses: 'https://api.commandcode.ai/provider/v1'
     })
-    expect(defaultProviderProtocolRules('command_code', 'payg')).toEqual([
+    expect(defaultProviderProtocolRules('commandcode', 'payg')).toEqual([
       { pattern: 'claude-*', protocol: 'anthropic' },
       { pattern: 'gpt-*', protocol: 'responses', extraProtocols: ['chat_completions'] }
     ])
-    expect(providerHasModelCatalog('command_code')).toBe(true)
+    expect(providerHasModelCatalog('commandcode')).toBe(true)
     expect(providerHasModelCatalog('opencode_go')).toBe(false)
   })
 
   it('shows both the quota windows and the credit balance for official-host API keys only', () => {
-    const account = (credentials: Record<string, unknown>, type = 'apikey') => ({ platform: 'command_code', type, credentials })
+    const account = (credentials: Record<string, unknown>, type = 'apikey') => ({ platform: 'commandcode', type, credentials })
     expect(cnQuotaCellVisible(account({ account_mode: 'payg' }))).toBe(true)
     expect(cnBalanceCellVisible(account({ account_mode: 'payg' }))).toBe(true)
     expect(cnQuotaCellVisible(account({ base_url: 'https://api.commandcode.ai/provider/v1' }))).toBe(true)
@@ -229,23 +229,23 @@ describe('credentialsBuilder built-in Command Code provider', () => {
 
 describe('credentialsBuilder built-in Cline provider', () => {
   it('only offers Chat Completions and routes by inbound protocol', () => {
-    expect(isMultiProtocolApiKeyPlatform('cline')).toBe(true)
-    expect(providerRoutesByModel('cline')).toBe(false)
+    expect(isMultiProtocolApiKeyPlatform('clinepass')).toBe(true)
+    expect(providerRoutesByModel('clinepass')).toBe(false)
     // 积分与 ClinePass 共用同一个 Key 与端点，只有一个接入模式（不显示账号类型）。
-    expect(providerAccountModes('cline')).toEqual(['payg'])
-    expect(defaultCNAdaptiveBaseUrls('cline', 'payg')).toEqual({
+    expect(providerAccountModes('clinepass')).toEqual(['payg'])
+    expect(defaultCNAdaptiveBaseUrls('clinepass', 'payg')).toEqual({
       chat_completions: 'https://api.cline.bot/api/v1',
       anthropic: '',
       responses: ''
     })
-    expect(providerNativeProtocols('cline', 'payg')).toEqual(['chat_completions'])
-    expect(defaultProviderProtocolRules('cline', 'payg')).toEqual([])
+    expect(providerNativeProtocols('clinepass', 'payg')).toEqual(['chat_completions'])
+    expect(defaultProviderProtocolRules('clinepass', 'payg')).toEqual([])
   })
 
   it('shows ClinePass windows and the credit balance for official-host API keys only', () => {
-    expect(cnQuotaCellVisible({ platform: 'cline', type: 'apikey', credentials: {} })).toBe(true)
-    expect(cnBalanceCellVisible({ platform: 'cline', type: 'apikey', credentials: {} })).toBe(true)
-    const relay = { platform: 'cline', type: 'apikey', credentials: { base_url: 'https://relay.example.com/v1' } }
+    expect(cnQuotaCellVisible({ platform: 'clinepass', type: 'apikey', credentials: {} })).toBe(true)
+    expect(cnBalanceCellVisible({ platform: 'clinepass', type: 'apikey', credentials: {} })).toBe(true)
+    const relay = { platform: 'clinepass', type: 'apikey', credentials: { base_url: 'https://relay.example.com/v1' } }
     expect(cnQuotaCellVisible(relay)).toBe(false)
     expect(cnBalanceCellVisible(relay)).toBe(false)
   })

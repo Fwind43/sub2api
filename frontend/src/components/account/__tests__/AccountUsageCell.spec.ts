@@ -347,7 +347,7 @@ describe('AccountUsageCell', () => {
       props: {
         account: makeAccount({
           id: 9103,
-          platform: 'command_code',
+          platform: 'commandcode',
           type: 'apikey',
           credentials: { api_key: 'user_test_key', account_mode: 'payg' }
         })
@@ -369,7 +369,7 @@ describe('AccountUsageCell', () => {
       props: {
         account: makeAccount({
           id: 9105,
-          platform: 'command_code',
+          platform: 'commandcode',
           type: 'apikey',
           credentials: { api_key: 'user_test_key', account_mode: 'payg', base_url: 'https://relay.example.com/v1' }
         })
@@ -389,7 +389,7 @@ describe('AccountUsageCell', () => {
       props: {
         account: makeAccount({
           id: 9104,
-          platform: 'cline',
+          platform: 'clinepass',
           type: 'apikey',
           credentials: { api_key: 'sk-cline' }
         })

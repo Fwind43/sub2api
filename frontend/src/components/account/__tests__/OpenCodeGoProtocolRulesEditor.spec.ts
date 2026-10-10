@@ -11,7 +11,7 @@ vi.mock('vue-i18n', async () => {
   }
 })
 
-function mountEditor(rows: OpenCodeGoProtocolRule[], platform = 'command_code', plan = 'payg') {
+function mountEditor(rows: OpenCodeGoProtocolRule[], platform = 'commandcode', plan = 'payg') {
   return mount(OpenCodeGoProtocolRulesEditor, {
     props: { rows, platform, plan },
     global: { stubs: { Icon: true } }

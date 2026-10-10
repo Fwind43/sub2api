@@ -97,8 +97,8 @@ describe('ChannelsView pricing model sync', () => {
     ['openai', true],
     ['opencode_go', true],
     ['typesafe', true],
-    ['command_code', false],
-    ['cline', false]
+    ['commandcode', false],
+    ['clinepass', false]
   ] as const)('offers pricing model sync for %s only when its pricing catalog exists', async (platform, expected) => {
     const wrapper = mountView()
     await openDialog(wrapper)
