@@ -159,6 +159,12 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		return s.forwardGrokResponses(ctx, c, account, body, originalModel, reqStream, startTime)
 	}
 
+	// fork: CommandCode / ClinePass 的 /v1/responses 入站必须走 CC 原生 /alpha/generate
+	// （raw chat completions 管道），否则会打到上游 OpenAI 形状的 /v1/responses。
+	if account.Platform == PlatformCommandCode || account.Platform == PlatformClinePass {
+		return s.forwardResponsesViaRawChatCompletions(ctx, c, account, body, startTime)
+	}
+
 	if account.IsOpenAIApiKey() {
 		if normalized, changed, normalizeErr := normalizeOpenAIParallelToolCallsWithoutTools(body, responsesLite); normalizeErr != nil {
 			return nil, normalizeErr
