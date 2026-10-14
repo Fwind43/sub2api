@@ -85,11 +85,26 @@ export function isKnownPlatform(platform: string | null | undefined): boolean {
   return !!getPlatformSpec(platform)
 }
 
+/**
+ * 后端 buildUpstreamModelsRequest（backend/internal/service/upstream_models.go）为这些平台
+ * 提供了固定分支，但平台清单无法表达该能力（它们没有多协议 profile）。
+ * 新增/删除后端分支时必须同步维护此列表，否则对应平台的「同步上游模型」按钮会缺失。
+ */
+const upstreamModelSyncPlatforms = new Set([
+  'anthropic',
+  'openai',
+  'gemini',
+  'antigravity',
+  'grok',
+  'commandcode',
+  'clinepass'
+])
+
 /** 与后端 buildUpstreamModelsRequest 支持的平台保持一致。 */
 export function supportsUpstreamModelSync(platform: string | null | undefined): boolean {
   const spec = getPlatformSpec(platform?.trim().toLowerCase())
   if (!spec) return false
-  return !!spec.multi_protocol || ['anthropic', 'openai', 'gemini', 'antigravity', 'grok'].includes(spec.id)
+  return !!spec.multi_protocol || upstreamModelSyncPlatforms.has(spec.id)
 }
 
 /** 清单中声明了定价目录 provider 的平台才支持同步定价模型。 */
