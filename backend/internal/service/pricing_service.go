@@ -139,14 +139,6 @@ var (
 		CacheReadInputTokenCost: 0.2e-6,
 		LiteLLMProvider:         "anthropic", Mode: "chat", SupportsPromptCaching: true,
 	}
-	claudeHaiku55FallbackPricing = &LiteLLMModelPricing{
-		InputCostPerToken: 1e-7, OutputCostPerToken: 5e-7,
-		CacheCreationInputTokenCost: 1.25e-7, CacheCreationInputTokenCostAbove1hr: 2e-7,
-		CacheReadInputTokenCost:        1e-8,
-		LongContextInputTokenThreshold: 100000,
-		LongContextInputCostMultiplier: 5, LongContextOutputCostMultiplier: 5,
-		LiteLLMProvider: "anthropic", Mode: "chat", SupportsPromptCaching: true,
-	}
 	openAIGPT56SolFallbackPricing = &LiteLLMModelPricing{
 		InputCostPerToken:                   5e-06,
 		InputCostPerTokenPriority:           1e-05,
@@ -232,13 +224,20 @@ type LiteLLMModelPricing struct {
 	InputCostPerImageToken              float64 `json:"input_cost_per_image_token"`  // 图片输入 token 价格（如 gpt-image-2 图片编辑）
 	CacheReadInputImageTokenCost        float64 `json:"cache_read_input_image_token_cost"`
 	// CacheStorageCostPerTokenPerHour 显式上下文缓存存储单价（每 token 每小时，USD），一般由定价覆盖文件提供，
-	// 配置后优先于内置价（见 BillingService.CacheStoragePricePerTokenHour）。
+	// 来自 LiteLLM 的 cache_storage_cost_per_token_per_hour 属性。仅 Anthropic 模型支持显式缓存存储收费。
 	CacheStorageCostPerTokenPerHour float64 `json:"cache_storage_cost_per_token_per_hour"`
 
 	// TokenPricingAbsent 表示源数据中 input/output token 价格均缺失（仅有图片价）。
 	// 此类条目只可用于图片计费，token 计费必须回退到 fallback 或 fail-closed，
 	// 否则 token 流量会被按 $0 计费。零值（false）表示条目具备 token 价格。
 	TokenPricingAbsent bool `json:"-"`
+
+	// GlobalPricing 表示该模型价格来自管理页维护的全局统一价文件（优先级最高）。
+	// 计费端据此跳过对 DeepSeek 的官方价强制覆盖与官方峰谷叠加，让运营者配置真正生效。
+	GlobalPricing bool `json:"-"`
+	// GlobalTimePricing 全局统一价条目里的时间段（峰谷）倍率配置，来自条目的
+	// time_pricing 字段；仅全局统一价条目支持该字段。
+	GlobalTimePricing *ChannelTimePricing `json:"-"`
 }
 
 // PricingRemoteClient 远程价格数据获取接口
@@ -269,7 +268,9 @@ type LiteLLMRawEntry struct {
 	OutputCostPerImageToken             *float64 `json:"output_cost_per_image_token"`
 	InputCostPerImageToken              *float64 `json:"input_cost_per_image_token"`
 	CacheReadInputImageTokenCost        *float64 `json:"cache_read_input_image_token_cost"`
-	CacheStorageCostPerTokenPerHour     *float64 `json:"cache_storage_cost_per_token_per_hour"`
+	// TimePricing 全局统一价条目的时间段（峰谷）倍率配置，格式与渠道分时定价一致。
+	// LiteLLM 目录本身不含该字段，仅管理页全局统一价使用。
+	TimePricing json.RawMessage `json:"time_pricing"`
 }
 
 // PricingService 动态价格服务
@@ -283,6 +284,8 @@ type PricingService struct {
 	// fallback/override 文件在最近一次成功重建时的内容指纹，定时器据此判断是否
 	// 需要从本地目录缓存重建叠加层。
 	customFilesHash string
+	// globalPricingMu 串行化全局统一价文件的读改写与热重载，避免并发写丢失更新。
+	globalPricingMu sync.Mutex
 
 	// 停止信号
 	stopCh chan struct{}
@@ -473,22 +476,25 @@ func (s *PricingService) syncWithRemote() error {
 	return nil
 }
 
-// hasCustomPricingFiles 报告是否配置了 fallback/override 任一文件路径（不要求文件存在）。
+// hasCustomPricingFiles 报告是否存在可热重载的定价叠加文件（fallback/override 路径，或
+// 管理页写入的全局统一价文件；不要求文件已存在）。
 func (s *PricingService) hasCustomPricingFiles() bool {
 	if s == nil || s.cfg == nil {
 		return false
 	}
-	return strings.TrimSpace(s.cfg.Pricing.FallbackFile) != "" || strings.TrimSpace(s.cfg.Pricing.OverrideFile) != ""
+	return strings.TrimSpace(s.cfg.Pricing.FallbackFile) != "" ||
+		strings.TrimSpace(s.cfg.Pricing.OverrideFile) != "" ||
+		strings.TrimSpace(s.globalPricingFilePath()) != ""
 }
 
-// customPricingFilesFingerprint 返回 fallback、override 两个文件当前内容的联合 sha256。
-// 每个文件以"长度前缀 + 正文"参与计算，不可读的文件按空正文处理；未配置任何文件返回空串。
+// customPricingFilesFingerprint 返回 fallback、override 与全局统一价三个文件当前内容的联合
+// sha256。每个文件以"长度前缀 + 正文"参与计算，不可读的文件按空正文处理；未配置任何文件返回空串。
 func (s *PricingService) customPricingFilesFingerprint() string {
 	if !s.hasCustomPricingFiles() {
 		return ""
 	}
 	h := sha256.New()
-	for _, path := range []string{s.cfg.Pricing.FallbackFile, s.cfg.Pricing.OverrideFile} {
+	for _, path := range []string{s.cfg.Pricing.FallbackFile, s.cfg.Pricing.OverrideFile, s.globalPricingFilePath()} {
 		var body []byte
 		if p := strings.TrimSpace(path); p != "" {
 			body, _ = os.ReadFile(p)
@@ -501,10 +507,11 @@ func (s *PricingService) customPricingFilesFingerprint() string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// validateCustomPricingFiles 要求每个已配置且存在的 fallback/override 文件可读且为 JSON
-// 对象，任一不满足即返回带路径的错误；文件不存在视为该层为空，属合法状态。
+// validateCustomPricingFiles 要求每个已配置且存在的 fallback/override（以及管理页写入的
+// 全局统一价）文件可读且为 JSON 对象，任一不满足即返回带路径的错误；文件不存在视为
+// 该层为空，属合法状态。
 func (s *PricingService) validateCustomPricingFiles() error {
-	for _, path := range []string{s.cfg.Pricing.FallbackFile, s.cfg.Pricing.OverrideFile} {
+	for _, path := range []string{s.cfg.Pricing.FallbackFile, s.cfg.Pricing.OverrideFile, s.globalPricingFilePath()} {
 		p := strings.TrimSpace(path)
 		if p == "" {
 			continue
@@ -662,6 +669,15 @@ func (s *PricingService) parsePricingData(body []byte) (map[string]*LiteLLMModel
 		return nil, fmt.Errorf("parse raw JSON: %w", err)
 	}
 	rawData = s.applyPricingOverrides(rawData)
+	// 管理页维护的全局统一价优先级最高：压过目录与回退/覆盖文件，但仍由分组/渠道的
+	// 显式定价在后续解析中覆盖。
+	rawData = s.applyGlobalPricingOverrides(rawData)
+	// 全局统一价文件里的模型名集合：这些条目归为"全局自定义价"来源，计费端据此
+	// 跳过对 DeepSeek 的官方价强制覆盖与官方峰谷叠加。
+	globalNames := make(map[string]struct{})
+	for name := range s.loadGlobalPricingEntries() {
+		globalNames[name] = struct{}{}
+	}
 
 	result := make(map[string]*LiteLLMModelPricing)
 	skipped := 0
@@ -691,6 +707,10 @@ func (s *PricingService) parsePricingData(body []byte) (map[string]*LiteLLMModel
 			SupportsPromptCaching: entry.SupportsPromptCaching,
 			SupportsServiceTier:   entry.SupportsServiceTier,
 			TokenPricingAbsent:    entry.InputCostPerToken == nil && entry.OutputCostPerToken == nil,
+		}
+		if _, ok := globalNames[modelName]; ok {
+			pricing.GlobalPricing = true
+			pricing.GlobalTimePricing = parseGlobalTimePricing(entry.TimePricing, modelName)
 		}
 
 		if entry.InputCostPerToken != nil {
@@ -741,9 +761,6 @@ func (s *PricingService) parsePricingData(body []byte) (map[string]*LiteLLMModel
 		}
 		if entry.CacheReadInputImageTokenCost != nil {
 			pricing.CacheReadInputImageTokenCost = *entry.CacheReadInputImageTokenCost
-		}
-		if entry.CacheStorageCostPerTokenPerHour != nil {
-			pricing.CacheStorageCostPerTokenPerHour = *entry.CacheStorageCostPerTokenPerHour
 		}
 
 		hasExplicitLongContext := entry.LongContextInputTokenThreshold != nil ||
@@ -967,6 +984,201 @@ func (s *PricingService) loadPricingOverrideEntries() map[string]json.RawMessage
 		return nil
 	}
 	return entries
+}
+
+// globalPricingFilePath 返回管理页维护的「全局模型统一价」文件路径。该文件位于持久化的
+// 价格数据目录内（pricing.data_dir），按模型名键存放完整价格条目，是优先级最高的定价层：
+// 压过内置目录与回退文件，但仍让位于分组/渠道的显式定价。
+func (s *PricingService) globalPricingFilePath() string {
+	if s == nil || s.cfg == nil {
+		return ""
+	}
+	dataDir := strings.TrimSpace(s.cfg.Pricing.DataDir)
+	if dataDir == "" {
+		// 未配置持久化目录时不启用该层，避免相对路径被误判为"已配置的叠加文件"。
+		return ""
+	}
+	return filepath.Join(dataDir, "global_model_prices.json")
+}
+
+// loadGlobalPricingEntries 读取全局统一价文件的原始条目。文件不存在或解析失败时返回 nil
+// （视作该层为空），不影响目录加载。
+func (s *PricingService) loadGlobalPricingEntries() map[string]json.RawMessage {
+	path := s.globalPricingFilePath()
+	if path == "" {
+		return nil
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			logger.LegacyPrintf("service.pricing", "[Pricing] Warning: global pricing load skipped: %v", err)
+		}
+		return nil
+	}
+	var entries map[string]json.RawMessage
+	if err := json.Unmarshal(body, &entries); err != nil {
+		logger.LegacyPrintf("service.pricing", "[Pricing] Warning: global pricing load skipped: %v", err)
+		return nil
+	}
+	return entries
+}
+
+// applyGlobalPricingOverrides 把管理页维护的全局统一价逐字段修补进原始目录数据；目录中不
+// 存在的模型直接整体注入（全局价条目自带完整价格，且优先级最高，不走 mergeOverrideOnlyModels
+// 的"目录/回退都缺才并入"延迟逻辑，避免被回退文件的同名条目抢先占位）。
+func (s *PricingService) applyGlobalPricingOverrides(rawData map[string]json.RawMessage) map[string]json.RawMessage {
+	entries := s.loadGlobalPricingEntries()
+	if len(entries) == 0 {
+		return rawData
+	}
+	if rawData == nil {
+		rawData = make(map[string]json.RawMessage, len(entries))
+	}
+	for name, pricing := range entries {
+		base, ok := rawData[name]
+		if !ok {
+			rawData[name] = pricing
+			continue
+		}
+		merged, valid := mergePricingOverrideEntry(base, pricing)
+		if !valid {
+			logger.LegacyPrintf("service.pricing", "[Pricing] Warning: global pricing entry %q skipped: not a JSON object", name)
+			continue
+		}
+		rawData[name] = merged
+	}
+	return rawData
+}
+
+// parseGlobalTimePricing 解析全局统一价条目的 time_pricing 字段。缺失或非法时返回 nil
+// （视作未配置分时倍率），并打 WARN，避免脏配置静默失效。
+func parseGlobalTimePricing(raw json.RawMessage, modelName string) *ChannelTimePricing {
+	if len(raw) == 0 {
+		return nil
+	}
+	var config ChannelTimePricing
+	if err := json.Unmarshal(raw, &config); err != nil {
+		logger.LegacyPrintf("service.pricing", "[Pricing] Warning: global pricing entry %q has invalid time_pricing: %v", modelName, err)
+		return nil
+	}
+	if len(config.Periods) == 0 {
+		return nil
+	}
+	if err := validateChannelTimePricing(&config); err != nil {
+		logger.LegacyPrintf("service.pricing", "[Pricing] Warning: global pricing entry %q time_pricing skipped: %v", modelName, err)
+		return nil
+	}
+	return &config
+}
+
+// GlobalPricingFilePath 暴露全局统一价文件路径（供管理员接口读写）。
+func (s *PricingService) GlobalPricingFilePath() string {
+	return s.globalPricingFilePath()
+}
+
+// GlobalPricingEntries 返回全局统一价的当前条目快照（模型名 -> 原始价格 JSON）。
+func (s *PricingService) GlobalPricingEntries() map[string]json.RawMessage {
+	s.globalPricingMu.Lock()
+	defer s.globalPricingMu.Unlock()
+	return s.loadGlobalPricingEntries()
+}
+
+// SaveGlobalPricingEntry 写入/更新单个模型的全局统一价并热重载。patch 必须是 JSON 对象。
+func (s *PricingService) SaveGlobalPricingEntry(model string, patch json.RawMessage) error {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return fmt.Errorf("model name is required")
+	}
+	var fields map[string]any
+	if err := json.Unmarshal(patch, &fields); err != nil || fields == nil {
+		return fmt.Errorf("pricing entry must be a JSON object")
+	}
+	// time_pricing 复用渠道分时定价的校验口径，非法配置直接拒绝而不是静默丢弃。
+	if rawTime, ok := fields["time_pricing"]; ok && rawTime != nil {
+		body, err := json.Marshal(rawTime)
+		if err != nil {
+			return fmt.Errorf("time_pricing is invalid: %w", err)
+		}
+		var config ChannelTimePricing
+		if err := json.Unmarshal(body, &config); err != nil {
+			return fmt.Errorf("time_pricing is invalid: %w", err)
+		}
+		if err := validateChannelTimePricing(&config); err != nil {
+			return fmt.Errorf("time_pricing is invalid: %w", err)
+		}
+	}
+	s.globalPricingMu.Lock()
+	defer s.globalPricingMu.Unlock()
+	entries := s.loadGlobalPricingEntries()
+	if entries == nil {
+		entries = make(map[string]json.RawMessage)
+	}
+	normalized, err := json.Marshal(fields)
+	if err != nil {
+		return err
+	}
+	entries[model] = normalized
+	if err := s.writeGlobalPricingEntries(entries); err != nil {
+		return err
+	}
+	return s.reloadGlobalPricingLayers()
+}
+
+// DeleteGlobalPricingEntry 删除单个模型的全局统一价并热重载。
+func (s *PricingService) DeleteGlobalPricingEntry(model string) error {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return fmt.Errorf("model name is required")
+	}
+	s.globalPricingMu.Lock()
+	defer s.globalPricingMu.Unlock()
+	entries := s.loadGlobalPricingEntries()
+	if _, ok := entries[model]; !ok {
+		return nil
+	}
+	delete(entries, model)
+	if err := s.writeGlobalPricingEntries(entries); err != nil {
+		return err
+	}
+	return s.reloadGlobalPricingLayers()
+}
+
+// ReloadGlobalPricing 供管理员接口在直接改动全局统一价文件后手动重建内存价格表。
+func (s *PricingService) ReloadGlobalPricing() error {
+	s.globalPricingMu.Lock()
+	defer s.globalPricingMu.Unlock()
+	return s.reloadGlobalPricingLayers()
+}
+
+// writeGlobalPricingEntries 原子写入全局统一价文件（临时文件 + rename），目录不存在时创建。
+func (s *PricingService) writeGlobalPricingEntries(entries map[string]json.RawMessage) error {
+	path := s.globalPricingFilePath()
+	if path == "" {
+		return fmt.Errorf("global pricing file path is not configured")
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	body, err := json.MarshalIndent(entries, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, body, 0644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+// reloadGlobalPricingLayers 在全局统一价变更后立即重建内存价格表，使计费路径即时生效。
+func (s *PricingService) reloadGlobalPricingLayers() error {
+	err := s.reloadCustomPricingLayers()
+	if err != nil {
+		logger.LegacyPrintf("service.pricing", "[Pricing] Global pricing reload failed: %v", err)
+		return err
+	}
+	logger.LegacyPrintf("service.pricing", "[Pricing] Global pricing reloaded (%d models total)", len(s.pricingData))
+	return nil
 }
 
 // mergePricingOverrideEntry 在 JSON 字段层浅合并：patch 字段覆盖 base 同名字段，
@@ -1422,12 +1634,6 @@ func (s *PricingService) matchByModelFamily(model string) *LiteLLMModelPricing {
 			return pricing
 		}
 		return claudeSonnet55FallbackPricing
-	}
-	if claude.IsHaiku55(model) {
-		if pricing, ok := s.pricingData["claude-haiku-5-5"]; ok {
-			return pricing
-		}
-		return claudeHaiku55FallbackPricing
 	}
 	// modelFamily 定义一个模型系列的匹配和定价查找规则。
 	type modelFamily struct {

@@ -263,6 +263,44 @@
             <PlatformIcon :platform="spec.id" size="sm" />
             {{ spec.display_name }}
           </button>
+          <button
+            type="button"
+            @click="selectCommandCodePlatform()"
+            :class="[
+              'flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2.5 text-sm font-medium transition-all',
+              form.platform === 'commandcode'
+                ? 'bg-white text-primary-600 shadow-sm dark:bg-dark-600 dark:text-primary-400'
+                : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
+            ]"
+          >
+            CommandCode
+          </button>
+          <button
+            type="button"
+            @click="selectTypeSafePlatform()"
+            :class="[
+              'flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2.5 text-sm font-medium transition-all',
+              form.platform === 'typesafe'
+                ? 'bg-white text-sky-700 shadow-sm dark:bg-dark-600 dark:text-sky-300'
+                : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
+            ]"
+          >
+            <PlatformIcon platform="typesafe" size="sm" />
+            TypeSafe / Jev
+          </button>
+          <button
+            type="button"
+            @click="selectClinePassPlatform()"
+            :class="[
+              'flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2.5 text-sm font-medium transition-all',
+              form.platform === 'clinepass'
+                ? 'bg-white text-fuchsia-700 shadow-sm dark:bg-dark-600 dark:text-fuchsia-300'
+                : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
+            ]"
+          >
+            <PlatformIcon platform="clinepass" size="sm" />
+            ClinePass
+          </button>
         </div>
       </div>
 
@@ -381,8 +419,8 @@
               <Icon name="cloud" size="sm" />
             </div>
             <div>
-              <span class="block text-sm font-medium text-gray-900 dark:text-white">{{ t('admin.accounts.vertexLabel') }}</span>
-              <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.vertexDesc') }}</span>
+              <span class="block text-sm font-medium text-gray-900 dark:text-white">Vertex</span>
+              <span class="text-xs text-gray-500 dark:text-gray-400">Service Account</span>
             </div>
           </button>
 
@@ -830,18 +868,17 @@
             </div>
             <div>
               <span class="block text-sm font-medium text-gray-900 dark:text-white">
-                {{ t('admin.accounts.vertexLabel') }}
+                Vertex
               </span>
               <span class="text-xs text-gray-500 dark:text-gray-400">
-                {{ t('admin.accounts.vertexGeminiDesc') }}
+                Service Account
               </span>
             </div>
           </button>
         </div>
 
         <div
-          v-if="accountCategory === 'apikey' && isOfficialGeminiBaseUrl(apiKeyBaseUrl)"
-          data-testid="gemini-apikey-note"
+          v-if="accountCategory === 'apikey'"
           class="mt-3 rounded-lg border border-purple-200 bg-purple-50 px-3 py-2 text-xs text-purple-800 dark:border-purple-800/40 dark:bg-purple-900/20 dark:text-purple-200"
         >
           <p>{{ t('admin.accounts.gemini.accountType.apiKeyNote') }}</p>
@@ -1069,7 +1106,7 @@
         </div>
 
         <!-- Tier selection (used as fallback when auto-detection is unavailable/fails) -->
-        <div v-if="accountCategory === 'oauth-based'" class="mt-4" data-testid="gemini-oauth-tier">
+        <div v-if="accountCategory !== 'service_account'" class="mt-4">
           <label class="input-label">{{ t('admin.accounts.gemini.tier.label') }}</label>
           <div class="mt-2">
             <select
@@ -1216,169 +1253,92 @@
 
       <!-- Vertex Service Account -->
       <div v-if="(form.platform === 'gemini' || form.platform === 'anthropic') && accountCategory === 'service_account'" class="space-y-4">
-        <div v-if="form.platform === 'gemini'">
-          <label class="input-label">{{ t('admin.accounts.vertexAuthMode') }}</label>
-          <div class="mt-2 flex gap-4">
-            <label class="flex cursor-pointer items-center">
-              <input
-                v-model="vertexAuthMode"
-                type="radio"
-                value="service_account"
-                class="mr-2 text-primary-600 focus:ring-primary-500"
-              />
-              <span class="text-sm text-gray-700 dark:text-gray-300">{{ t('admin.accounts.vertexAuthModeServiceAccount') }}</span>
-            </label>
-            <label class="flex cursor-pointer items-center">
-              <input
-                v-model="vertexAuthMode"
-                type="radio"
-                value="apikey"
-                data-testid="vertex-auth-mode-apikey"
-                class="mr-2 text-primary-600 focus:ring-primary-500"
-              />
-              <span class="text-sm text-gray-700 dark:text-gray-300">{{ t('admin.accounts.vertexAuthModeApiKey') }}</span>
-            </label>
+        <div>
+          <label class="input-label">Service Account JSON</label>
+          <input
+            ref="vertexServiceAccountFileInput"
+            type="file"
+            accept="application/json,.json"
+            class="hidden"
+            @change="handleVertexServiceAccountFile"
+          />
+          <div
+            :class="[
+              'rounded-lg border-2 border-dashed px-4 py-5 transition-colors',
+              vertexServiceAccountDragActive
+                ? 'border-sky-500 bg-sky-50 dark:border-sky-500 dark:bg-sky-900/20'
+                : 'border-gray-300 bg-gray-50 hover:border-sky-400 hover:bg-sky-50/60 dark:border-dark-500 dark:bg-dark-700/40 dark:hover:border-sky-600 dark:hover:bg-sky-900/10'
+            ]"
+            @dragenter.prevent="vertexServiceAccountDragActive = true"
+            @dragover.prevent="vertexServiceAccountDragActive = true"
+            @dragleave.prevent="vertexServiceAccountDragActive = false"
+            @drop.prevent="handleVertexServiceAccountDrop"
+          >
+            <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div class="min-w-0">
+                <div class="flex items-center gap-2 text-sm font-medium text-gray-900 dark:text-white">
+                  <Icon name="upload" size="sm" />
+                  <span>{{ vertexClientEmail ? t('admin.accounts.vertexSaJsonLoaded') : t('admin.accounts.vertexSaJsonDrop') }}</span>
+                </div>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  {{ vertexClientEmail ? t('admin.accounts.vertexSaJsonKeyHidden') : t('admin.accounts.vertexSaJsonDropHint') }}
+                </p>
+              </div>
+              <button
+                type="button"
+                class="btn btn-secondary shrink-0"
+                @click="vertexServiceAccountFileInput?.click()"
+              >
+                <Icon name="upload" size="sm" />
+                {{ t('admin.accounts.vertexSaJsonSelectBtn') }}
+              </button>
+            </div>
+            <div
+              v-if="vertexClientEmail"
+              class="mt-3 rounded-md border border-sky-200 bg-white px-3 py-2 text-xs text-sky-900 dark:border-sky-800/50 dark:bg-dark-800 dark:text-sky-200"
+            >
+              <div class="truncate">Project ID: <span class="font-mono">{{ vertexProjectId }}</span></div>
+              <div class="truncate">Client Email: <span class="font-mono">{{ vertexClientEmail }}</span></div>
+            </div>
           </div>
+          <p class="input-hint">{{ t('admin.accounts.vertexSaJsonUploadHint') }}</p>
         </div>
 
-        <template v-if="vertexUsesApiKey">
+        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
-            <label class="input-label">API Key</label>
+            <label class="input-label">Project ID</label>
             <input
-              v-model="vertexApiKey"
-              type="password"
+              v-model="vertexProjectId"
+              type="text"
+              class="input font-mono"
+              readonly
+              :placeholder="t('admin.accounts.vertexProjectIdPlaceholder')"
+            />
+          </div>
+          <div>
+            <label class="input-label">Location</label>
+            <select
+              v-model="vertexLocation"
               required
               class="input font-mono"
-              data-testid="vertex-api-key-input"
-            />
-            <p class="input-hint">{{ t('admin.accounts.vertexApiKeyHint') }}</p>
-          </div>
-          <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div>
-              <label class="input-label">Project ID</label>
-              <input
-                v-model="vertexProjectId"
-                type="text"
-                class="input font-mono"
-                data-testid="vertex-api-key-project-id-input"
-                :placeholder="t('admin.accounts.vertexApiKeyProjectIdPlaceholder')"
-              />
-              <p class="input-hint">{{ t('admin.accounts.vertexApiKeyProjectIdHint') }}</p>
-            </div>
-            <div v-if="vertexProjectId.trim()">
-              <label class="input-label">Location</label>
-              <select
-                v-model="vertexLocation"
-                required
-                class="input font-mono"
-              >
-                <optgroup
-                  v-for="group in VERTEX_LOCATION_OPTIONS"
-                  :key="group.label"
-                  :label="group.label"
-                >
-                  <option
-                    v-for="option in group.options"
-                    :key="option.value"
-                    :value="option.value"
-                  >
-                    {{ option.label }}
-                  </option>
-                </optgroup>
-              </select>
-              <p class="input-hint">{{ t('admin.accounts.vertexLocationHint') }}</p>
-            </div>
-          </div>
-        </template>
-
-        <template v-else>
-          <div>
-            <label class="input-label">Service Account JSON</label>
-            <input
-              ref="vertexServiceAccountFileInput"
-              type="file"
-              accept="application/json,.json"
-              class="hidden"
-              @change="handleVertexServiceAccountFile"
-            />
-            <div
-              :class="[
-                'rounded-lg border-2 border-dashed px-4 py-5 transition-colors',
-                vertexServiceAccountDragActive
-                  ? 'border-sky-500 bg-sky-50 dark:border-sky-500 dark:bg-sky-900/20'
-                  : 'border-gray-300 bg-gray-50 hover:border-sky-400 hover:bg-sky-50/60 dark:border-dark-500 dark:bg-dark-700/40 dark:hover:border-sky-600 dark:hover:bg-sky-900/10'
-              ]"
-              @dragenter.prevent="vertexServiceAccountDragActive = true"
-              @dragover.prevent="vertexServiceAccountDragActive = true"
-              @dragleave.prevent="vertexServiceAccountDragActive = false"
-              @drop.prevent="handleVertexServiceAccountDrop"
             >
-              <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div class="min-w-0">
-                  <div class="flex items-center gap-2 text-sm font-medium text-gray-900 dark:text-white">
-                    <Icon name="upload" size="sm" />
-                    <span>{{ vertexClientEmail ? t('admin.accounts.vertexSaJsonLoaded') : t('admin.accounts.vertexSaJsonDrop') }}</span>
-                  </div>
-                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                    {{ vertexClientEmail ? t('admin.accounts.vertexSaJsonKeyHidden') : t('admin.accounts.vertexSaJsonDropHint') }}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  class="btn btn-secondary shrink-0"
-                  @click="vertexServiceAccountFileInput?.click()"
-                >
-                  <Icon name="upload" size="sm" />
-                  {{ t('admin.accounts.vertexSaJsonSelectBtn') }}
-                </button>
-              </div>
-              <div
-                v-if="vertexClientEmail"
-                class="mt-3 rounded-md border border-sky-200 bg-white px-3 py-2 text-xs text-sky-900 dark:border-sky-800/50 dark:bg-dark-800 dark:text-sky-200"
+              <optgroup
+                v-for="group in VERTEX_LOCATION_OPTIONS"
+                :key="group.label"
+                :label="group.label"
               >
-                <div class="truncate">Project ID: <span class="font-mono">{{ vertexProjectId }}</span></div>
-                <div class="truncate">Client Email: <span class="font-mono">{{ vertexClientEmail }}</span></div>
-              </div>
-            </div>
-            <p class="input-hint">{{ t('admin.accounts.vertexSaJsonUploadHint') }}</p>
-          </div>
-
-          <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div>
-              <label class="input-label">Project ID</label>
-              <input
-                v-model="vertexProjectId"
-                type="text"
-                class="input font-mono"
-                readonly
-                :placeholder="t('admin.accounts.vertexProjectIdPlaceholder')"
-              />
-            </div>
-            <div>
-              <label class="input-label">Location</label>
-              <select
-                v-model="vertexLocation"
-                required
-                class="input font-mono"
-              >
-                <optgroup
-                  v-for="group in VERTEX_LOCATION_OPTIONS"
-                  :key="group.label"
-                  :label="group.label"
+                <option
+                  v-for="option in group.options"
+                  :key="option.value"
+                  :value="option.value"
                 >
-                  <option
-                    v-for="option in group.options"
-                    :key="option.value"
-                    :value="option.value"
-                  >
-                    {{ option.label }}
-                  </option>
-                </optgroup>
-              </select>
-              <p class="input-hint">{{ t('admin.accounts.vertexLocationHint') }}</p>
-            </div>
+                  {{ option.label }}
+                </option>
+              </optgroup>
+            </select>
+            <p class="input-hint">{{ t('admin.accounts.vertexLocationHint') }}</p>
           </div>
-        </template>
+        </div>
       </div>
 
       <!-- Antigravity model restriction (applies to OAuth + Upstream) -->
@@ -1501,6 +1461,23 @@
 
       <!-- API Key input (only for apikey type, excluding Antigravity which has its own fields) -->
       <div v-if="form.type === 'apikey' && form.platform !== 'antigravity'" class="space-y-4">
+        <CommandCodeAuthorization
+          v-if="props.show && form.platform === 'commandcode'"
+          @authorized="onCommandCodeAuthorized"
+        />
+        <div v-if="form.platform === 'openai' && accountCategory === 'apikey'">
+          <label for="commandcode-gateway-preset" class="input-label">{{ t('admin.accounts.gatewayPreset.label') }}</label>
+          <Select
+            id="commandcode-gateway-preset"
+            v-model="gatewayPreset"
+            :options="gatewayPresetOptions"
+            :aria-label="t('admin.accounts.gatewayPreset.label')"
+            :aria-describedby="commandCodePreset ? 'commandcode-gateway-hint' : undefined"
+          />
+          <p v-if="commandCodePreset" id="commandcode-gateway-hint" class="input-hint" role="status">
+            {{ t('admin.accounts.gatewayPreset.hint') }}
+          </p>
+        </div>
         <div v-if="!isMultiProtocolPlatform || apiProtocol !== 'adaptive'">
           <label class="input-label">{{ t('admin.accounts.baseUrl') }}</label>
           <input
@@ -1580,9 +1557,9 @@
         </div>
 
         <!-- Gemini API Key tier selection -->
-        <div v-if="form.platform === 'gemini' && isOfficialGeminiBaseUrl(apiKeyBaseUrl)">
+        <div v-if="form.platform === 'gemini'">
           <label class="input-label">{{ t('admin.accounts.gemini.tier.label') }}</label>
-          <select v-model="geminiTierAIStudio" class="input" data-testid="gemini-apikey-tier">
+          <select v-model="geminiTierAIStudio" class="input">
             <option value="aistudio_free">{{ t('admin.accounts.gemini.tier.aiStudio.free') }}</option>
             <option value="aistudio_paid">{{ t('admin.accounts.gemini.tier.aiStudio.paid') }}</option>
           </select>
@@ -1660,8 +1637,8 @@
             <!-- Whitelist Mode -->
             <div v-if="modelRestrictionMode === 'whitelist'">
               <ModelWhitelistSelector
+                v-model:model-mappings="modelMappings"
                 v-model="allowedModels"
-                :model-mappings="modelMappings"
                 :platform="form.platform"
                 :sync-credentials="syncPreviewCredentials"
                 @upstream-synced="upstreamModelsPreviewed = true"
@@ -1841,48 +1818,6 @@
             />
             <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
               {{ t('admin.accounts.poolModeRetryStatusCodesHint', { default: DEFAULT_POOL_MODE_RETRY_STATUS_CODES.join(', ') }) }}
-            </p>
-          </div>
-        </div>
-
-        <!-- Gemini 显式缓存上游开关：仅自定义地址的 Gemini API Key 账号 -->
-        <div
-          v-if="form.platform === 'gemini' && !isOfficialGeminiBaseUrl(apiKeyBaseUrl)"
-          class="border-t border-gray-200 pt-4 dark:border-dark-600"
-          data-testid="explicit-cache-upstream-section"
-        >
-          <div class="flex items-center justify-between gap-4">
-            <div>
-              <label class="input-label mb-0">{{ t('admin.accounts.explicitCacheUpstream') }}</label>
-              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                {{ t('admin.accounts.explicitCacheUpstreamHint') }}
-              </p>
-            </div>
-            <Toggle
-              v-model="explicitCacheUpstreamEnabled"
-              data-testid="explicit-cache-upstream-toggle"
-              :aria-label="t('admin.accounts.explicitCacheUpstream')"
-            />
-          </div>
-          <div v-if="explicitCacheUpstreamEnabled" class="mt-3 rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20">
-            <p class="text-xs text-blue-700 dark:text-blue-400">
-              <Icon name="exclamationCircle" size="sm" class="mr-1 inline" :stroke-width="2" />
-              {{ t('admin.accounts.explicitCacheUpstreamInfo') }}
-            </p>
-          </div>
-          <div v-if="explicitCacheUpstreamEnabled" class="mt-3">
-            <label class="input-label">{{ t('admin.accounts.explicitCacheUpstreamMaxTTL') }}</label>
-            <input
-              v-model="explicitCacheUpstreamMaxTTL"
-              data-testid="explicit-cache-upstream-max-ttl"
-              type="number"
-              min="1"
-              step="1"
-              class="input"
-              placeholder="86400"
-            />
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.accounts.explicitCacheUpstreamMaxTTLHint') }}
             </p>
           </div>
         </div>
@@ -2190,8 +2125,8 @@
           <!-- Whitelist Mode -->
           <div v-if="modelRestrictionMode === 'whitelist'">
             <ModelWhitelistSelector
+              v-model:model-mappings="modelMappings"
               v-model="allowedModels"
-              :model-mappings="modelMappings"
               platform="anthropic"
               :sync-credentials="syncPreviewCredentials"
               @upstream-synced="upstreamModelsPreviewed = true"
@@ -2532,8 +2467,8 @@
           <!-- Whitelist Mode -->
           <div v-if="modelRestrictionMode === 'whitelist'">
             <ModelWhitelistSelector
+              v-model:model-mappings="modelMappings"
               v-model="allowedModels"
-              :model-mappings="modelMappings"
               :platform="form.platform"
               :sync-credentials="syncPreviewCredentials"
               @upstream-synced="upstreamModelsPreviewed = true"
@@ -2732,44 +2667,6 @@
                     class="input"
                     :placeholder="t('admin.accounts.tempUnschedulable.durationPlaceholder')"
                   />
-                </div>
-                <div class="sm:col-span-2">
-                  <label class="input-label">{{ t('admin.accounts.tempUnschedulable.scope') }}</label>
-                  <div
-                    class="grid grid-cols-1 gap-2 sm:grid-cols-2"
-                    role="radiogroup"
-                    :aria-label="t('admin.accounts.tempUnschedulable.scope')"
-                  >
-                    <button
-                      v-for="option in tempUnschedScopeOptions"
-                      :key="option.value"
-                      type="button"
-                      role="radio"
-                      :aria-checked="rule.scope === option.value"
-                      :data-testid="`temp-unsched-scope-${option.value}`"
-                      @click="rule.scope = option.value"
-                      :class="[
-                        'flex items-center gap-3 rounded-lg border-2 p-3 text-left transition-all',
-                        rule.scope === option.value
-                          ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
-                          : 'border-gray-200 hover:border-gray-400 dark:border-dark-600 dark:hover:border-gray-600'
-                      ]"
-                    >
-                      <span
-                        :class="[
-                          'flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2',
-                          rule.scope === option.value ? 'border-primary-500' : 'border-gray-300 dark:border-dark-500'
-                        ]"
-                      >
-                        <span v-if="rule.scope === option.value" class="h-1.5 w-1.5 rounded-full bg-primary-500" />
-                      </span>
-                      <span>
-                        <span class="block text-sm font-medium text-gray-900 dark:text-white">{{ option.label }}</span>
-                        <span class="text-xs text-gray-500 dark:text-gray-400">{{ option.description }}</span>
-                      </span>
-                    </button>
-                  </div>
-                  <p class="input-hint">{{ t('admin.accounts.tempUnschedulable.scopeHint') }}</p>
                 </div>
                 <div class="sm:col-span-2">
                   <label class="input-label">{{ t('admin.accounts.tempUnschedulable.keywords') }}</label>
@@ -3762,7 +3659,16 @@
 
     <!-- Step 2: OAuth Authorization -->
     <div v-else class="space-y-5">
+      <ClinePassAuthorization
+        v-if="form.platform === 'clinepass'"
+        :name="form.name"
+        :proxy-id="form.proxy_id"
+        :concurrency="form.concurrency"
+        :group-ids="form.group_ids"
+        @created="onClinePassCreated"
+      />
       <OAuthAuthorizationFlow
+        v-else
         ref="oauthFlowRef"
         :add-method="form.platform === 'anthropic' ? addMethod : 'oauth'"
         :auth-url="currentAuthUrl"
@@ -4112,7 +4018,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, watch } from 'vue'
+import { ref, reactive, computed, watch, nextTick } from 'vue'
+import { normalizeCommandCodeBaseUrl } from '@/utils/commandcode'
+import CommandCodeAuthorization from './CommandCodeAuthorization.vue'
+import ClinePassAuthorization from './ClinePassAuthorization.vue'
+import type { CommandCodeAuthorizationResult } from '@/utils/commandcodeAuthorization'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 
@@ -4146,8 +4056,7 @@ import type {
   CodexSessionImportMessage,
   OpenAICompactMode,
   OpenAIResponsesMode,
-  OpenAIEndpointCapability,
-  TempUnschedulableScope
+  OpenAIEndpointCapability
 } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
@@ -4164,7 +4073,6 @@ import QuotaLimitCard from '@/components/account/QuotaLimitCard.vue'
 import Toggle from '@/components/common/Toggle.vue'
 import GrokBaseUrlPresets from '@/components/account/GrokBaseUrlPresets.vue'
 import CnBaseUrlPresets from '@/components/account/CnBaseUrlPresets.vue'
-import { applyExplicitCacheUpstreamCredentials, isOfficialGeminiBaseUrl } from '@/utils/geminiExplicitCache'
 import OpenCodeGoProtocolRulesEditor from '@/components/account/OpenCodeGoProtocolRulesEditor.vue'
 import HeaderOverrideEditor from '@/components/account/HeaderOverrideEditor.vue'
 import { allSelectedGroupsEnableLongContextPricing } from '@/components/account/longContextBilling'
@@ -4278,6 +4186,8 @@ const apiKeyBaseUrlPlaceholder = computed(() => {
       return 'https://api.openai.com'
     case 'gemini':
       return 'https://generativelanguage.googleapis.com'
+    case 'commandcode':
+      return 'https://api.commandcode.ai'
     case 'grok':
       return 'https://api.x.ai/v1'
     case 'typesafe':
@@ -4292,7 +4202,9 @@ const apiKeyValuePlaceholder = computed(() => {
     case 'openai':
       return 'sk-proj-...'
     case 'gemini':
-      return 'AQ.Ab...'
+      return 'AIza...'
+    case 'commandcode':
+      return 'CommandCode API key'
     case 'grok':
       return 'xai-...'
     case 'kimi':
@@ -4383,8 +4295,6 @@ interface TempUnschedRuleForm {
   keywords: string
   duration_minutes: number | null
   description: string
-  // 作用范围：account 暂停整个账号，model 只冷却本次请求的模型。
-  scope: TempUnschedulableScope
 }
 
 // State
@@ -4394,6 +4304,17 @@ const accountCategory = ref<'oauth-based' | 'apikey' | 'bedrock' | 'service_acco
 const addMethod = ref<AddMethod>('oauth') // For oauth-based: 'oauth' or 'setup-token'
 const apiKeyBaseUrl = ref('https://api.anthropic.com')
 const apiKeyValue = ref('')
+const commandCodeAuthorization = ref<CommandCodeAuthorizationResult | null>(null)
+function onCommandCodeAuthorized(result: CommandCodeAuthorizationResult) {
+  apiKeyValue.value = result.apiKey
+  commandCodeAuthorization.value = result
+}
+function onClinePassCreated() {
+  appStore.showSuccess(t('admin.accounts.accountCreated'))
+  emit('created')
+  handleClose()
+}
+
 const upstreamBillingAutoProbeEnabled = ref(true)
 
 // ── 国产供应商（Kimi / Zhipu / DeepSeek）账号类型、API 协议与端点 ──
@@ -4511,6 +4432,14 @@ function selectCNPlatform(platform: CnProviderPlatform) {
   apiKeyBaseUrl.value = defaultCNBaseUrl(platform, accountMode.value, apiProtocol.value)
   resetAdaptiveBaseUrls(platform, accountMode.value)
 }
+function selectCommandCodePlatform() {
+  commandCodePreset.value = false
+  form.platform = 'commandcode'
+  form.type = 'apikey'
+  accountCategory.value = 'apikey'
+  apiKeyBaseUrl.value = 'https://api.commandcode.ai'
+}
+
 function selectOpenCodeGoPlatform() {
   form.platform = 'opencode_go'
   form.type = 'apikey'
@@ -4528,6 +4457,13 @@ function selectTypeSafePlatform() {
   apiKeyBaseUrl.value = 'https://api.typesafe.ai'
   allowedModels.value = ['jev-latest']
 }
+function selectClinePassPlatform() {
+  form.platform = 'clinepass'
+  form.type = 'oauth'
+  accountCategory.value = 'oauth-based'
+  apiKeyBaseUrl.value = 'https://api.cline.bot/api/v1'
+}
+
 function selectGenericMultiProtocolPlatform(platform: string) {
   form.platform = platform
   form.type = 'apikey'
@@ -4604,7 +4540,7 @@ const syncPreviewCredentials = computed(() => {
     ? adaptiveBaseUrls.value.chat_completions.trim() || apiKeyBaseUrl.value.trim()
     : apiKeyBaseUrl.value.trim()
   const modelMapping = buildModelMappingObject(
-    modelRestrictionMode.value,
+    form.platform === 'commandcode' ? 'combined' : modelRestrictionMode.value,
     allowedModels.value,
     modelMappings.value
   )
@@ -4635,8 +4571,6 @@ const DEFAULT_POOL_MODE_RETRY_COUNT = 3
 const MAX_POOL_MODE_RETRY_COUNT = 10
 const DEFAULT_POOL_MODE_RETRY_STATUS_CODES = [401, 403, 429]
 const poolModeEnabled = ref(false)
-const explicitCacheUpstreamEnabled = ref(false)
-const explicitCacheUpstreamMaxTTL = ref<string | number>('')
 const poolModeRetryCount = ref(DEFAULT_POOL_MODE_RETRY_COUNT)
 const poolModeRetryStatusCodesInput = ref('')
 
@@ -4699,6 +4633,36 @@ const applyGrokOAuthUpstreamConfig = (credentials: Record<string, unknown>) => {
 }
 const interceptWarmupRequests = ref(false)
 const autoPauseOnExpired = ref(true)
+const commandCodePreset = ref(false)
+const gatewayPresetOptions = computed(() => [
+  { value: 'custom', label: t('admin.accounts.gatewayPreset.custom') },
+  { value: 'commandcode', label: 'CommandCode' }
+])
+const gatewayPreset = computed({
+  get: () => commandCodePreset.value ? 'commandcode' : 'custom',
+  set: (value: string | number | boolean | null | undefined) => {
+    if (value === 'commandcode' && !commandCodePreset.value) {
+      void selectCommandCodePreset()
+    } else if (value !== 'commandcode') {
+      commandCodePreset.value = false
+    }
+  }
+})
+const selectCommandCodePreset = async () => {
+  form.platform = 'openai'
+  accountCategory.value = 'apikey'
+  await nextTick() // Let platform/category watchers finish before applying gateway defaults.
+  commandCodePreset.value = true
+  form.type = 'apikey'
+  apiKeyBaseUrl.value = ''
+  apiKeyValue.value = ''
+  openaiPassthroughEnabled.value = true
+  openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
+  poolModeEnabled.value = false
+  allowedModels.value = []
+  modelMappings.value = []
+  openAICompactModelMappings.value = []
+}
 const openaiPassthroughEnabled = ref(false)
 // OpenAI Codex namespace 工具摊平兼容开关（仅 OAuth），缺省关闭即原样保留
 const openaiFlattenNamespacesEnabled = ref(false)
@@ -4770,17 +4734,6 @@ const vertexProjectId = ref('')
 const vertexClientEmail = ref('')
 const vertexLocation = ref('global')
 const vertexServiceAccountDragActive = ref(false)
-const vertexAuthMode = ref<'service_account' | 'apikey'>('service_account')
-const vertexApiKey = ref('')
-// API Key 认证只对 Gemini 平台开放，Anthropic 平台的 Vertex 账号始终使用 Service Account JSON。
-const vertexUsesApiKey = computed(() => form.platform === 'gemini' && vertexAuthMode.value === 'apikey')
-// 两种认证方式的 Project ID 来源不同（JSON 读取 / 手填），切换时清空凭证字段避免串用。
-watch(vertexAuthMode, () => {
-  vertexServiceAccountJson.value = ''
-  vertexProjectId.value = ''
-  vertexClientEmail.value = ''
-  vertexApiKey.value = ''
-})
 const tempUnschedEnabled = ref(false)
 const tempUnschedRules = ref<TempUnschedRuleForm[]>([])
 const getModelMappingKey = createStableObjectKeyResolver<ModelMapping>('create-model-mapping')
@@ -4972,19 +4925,6 @@ const geminiHelpLinks = {
 
 // Computed: current preset mappings based on platform
 const presetMappings = computed(() => getPresetMappingsByPlatform(form.platform))
-const tempUnschedScopeOptions = computed<Array<{ value: TempUnschedulableScope; label: string; description: string }>>(() => [
-  {
-    value: 'model',
-    label: t('admin.accounts.tempUnschedulable.scopeModel'),
-    description: t('admin.accounts.tempUnschedulable.scopeModelDesc')
-  },
-  {
-    value: 'account',
-    label: t('admin.accounts.tempUnschedulable.scopeAccount'),
-    description: t('admin.accounts.tempUnschedulable.scopeAccountDesc')
-  }
-])
-
 const tempUnschedPresets = computed(() => [
   {
     label: t('admin.accounts.tempUnschedulable.presets.overloadLabel'),
@@ -4992,8 +4932,7 @@ const tempUnschedPresets = computed(() => [
       error_code: 529,
       keywords: 'overloaded, too many',
       duration_minutes: 60,
-      description: t('admin.accounts.tempUnschedulable.presets.overloadDesc'),
-      scope: 'model' as const
+      description: t('admin.accounts.tempUnschedulable.presets.overloadDesc')
     }
   },
   {
@@ -5002,8 +4941,7 @@ const tempUnschedPresets = computed(() => [
       error_code: 429,
       keywords: 'rate limit, too many requests',
       duration_minutes: 10,
-      description: t('admin.accounts.tempUnschedulable.presets.rateLimitDesc'),
-      scope: 'model' as const
+      description: t('admin.accounts.tempUnschedulable.presets.rateLimitDesc')
     }
   },
   {
@@ -5012,8 +4950,7 @@ const tempUnschedPresets = computed(() => [
       error_code: 503,
       keywords: 'unavailable, maintenance',
       duration_minutes: 30,
-      description: t('admin.accounts.tempUnschedulable.presets.unavailableDesc'),
-      scope: 'model' as const
+      description: t('admin.accounts.tempUnschedulable.presets.unavailableDesc')
     }
   }
 ])
@@ -5135,7 +5072,10 @@ watch(
   () => form.platform,
   (newPlatform) => {
     // Reset base URL based on platform
-    if (isMultiProtocolApiKeyPlatform(newPlatform)) {
+    if (newPlatform === 'commandcode') {
+      apiKeyBaseUrl.value = 'https://api.commandcode.ai'
+      accountCategory.value = 'apikey'
+    } else if (isCNProviderPlatform(newPlatform) || newPlatform === 'opencode_go' || isMultiProtocolApiKeyPlatform(newPlatform)) {
       const mode = newPlatform === 'opencode_go' ? openCodeAccountMode.value : accountMode.value
       apiKeyBaseUrl.value = defaultCNBaseUrl(newPlatform, mode, apiProtocol.value)
     } else {
@@ -5148,7 +5088,9 @@ watch(
               ? 'https://api.x.ai/v1'
               : newPlatform === 'typesafe'
                 ? 'https://api.typesafe.ai'
-              : 'https://api.anthropic.com'
+                : newPlatform === 'clinepass'
+                  ? 'https://api.cline.bot/api/v1'
+                  : 'https://api.anthropic.com'
     }
     // Clear model-related settings
     allowedModels.value = []
@@ -5201,8 +5143,6 @@ watch(
     vertexProjectId.value = ''
     vertexClientEmail.value = ''
     vertexLocation.value = 'global'
-    vertexAuthMode.value = 'service_account'
-    vertexApiKey.value = ''
     // Reset Anthropic/Antigravity-specific settings when switching to other platforms
     if (newPlatform !== 'anthropic' && newPlatform !== 'antigravity') {
       interceptWarmupRequests.value = false
@@ -5237,6 +5177,16 @@ watch(
     grokOAuth.resetState()
   }
 )
+
+watch([apiKeyValue, () => form.platform, () => props.show], ([key, platform, show]) => {
+  if (!show || platform !== 'commandcode' || key !== commandCodeAuthorization.value?.apiKey) {
+    commandCodeAuthorization.value = null
+  }
+})
+
+watch([() => form.platform, accountCategory], ([platform, category]) => {
+  if (platform !== 'openai' || category !== 'apikey') commandCodePreset.value = false
+})
 
 // Gemini AI Studio OAuth availability (requires operator-configured OAuth client)
 watch(
@@ -5400,8 +5350,7 @@ const addTempUnschedRule = (preset?: TempUnschedRuleForm) => {
     error_code: null,
     keywords: '',
     duration_minutes: 30,
-    description: '',
-    scope: 'model'
+    description: ''
   })
 }
 
@@ -5424,7 +5373,6 @@ const buildTempUnschedRules = (rules: TempUnschedRuleForm[]) => {
     keywords: string[]
     duration_minutes: number
     description: string
-    scope: TempUnschedulableScope
   }> = []
 
   for (const rule of rules) {
@@ -5444,8 +5392,7 @@ const buildTempUnschedRules = (rules: TempUnschedRuleForm[]) => {
       error_code: Math.trunc(errorCode),
       keywords,
       duration_minutes: Math.trunc(duration),
-      description: rule.description.trim(),
-      scope: rule.scope
+      description: rule.description.trim()
     })
   }
 
@@ -5608,6 +5555,8 @@ const submitCreateAccount = async (payload: CreateAccountRequest) => {
 
 // Methods
 const resetForm = () => {
+  commandCodeAuthorization.value = null
+  commandCodePreset.value = false
   step.value = 1
   form.name = ''
   form.notes = ''
@@ -5654,8 +5603,6 @@ const resetForm = () => {
   poolModeEnabled.value = false
   poolModeRetryCount.value = DEFAULT_POOL_MODE_RETRY_COUNT
   poolModeRetryStatusCodesInput.value = ''
-  explicitCacheUpstreamEnabled.value = false
-  explicitCacheUpstreamMaxTTL.value = ''
   customErrorCodesEnabled.value = false
   selectedErrorCodes.value = []
   customErrorCodeInput.value = null
@@ -5709,8 +5656,6 @@ const resetForm = () => {
   vertexProjectId.value = ''
   vertexClientEmail.value = ''
   vertexLocation.value = 'global'
-  vertexAuthMode.value = 'service_account'
-  vertexApiKey.value = ''
   tempUnschedEnabled.value = false
   tempUnschedRules.value = []
   geminiOAuthType.value = 'code_assist'
@@ -5807,6 +5752,12 @@ const buildOpenAIExtra = (base?: Record<string, unknown>): Record<string, unknow
     delete extra.images_url_to_b64_json
   }
 
+  if (commandCodePreset.value && accountCategory.value === 'apikey') {
+    extra.provider = 'commandcode_gateway'
+    extra.openai_passthrough = true
+    extra.openai_apikey_responses_websockets_v2_mode = OPENAI_WS_MODE_OFF
+    extra.openai_apikey_responses_websockets_v2_enabled = false
+  }
   return Object.keys(extra).length > 0 ? extra : undefined
 }
 
@@ -6059,28 +6010,6 @@ const handleSubmit = async () => {
       appStore.showError(t('admin.accounts.pleaseEnterAccountName'))
       return
     }
-    if (vertexUsesApiKey.value) {
-      if (!vertexApiKey.value.trim()) {
-        appStore.showError(t('admin.accounts.vertexApiKeyRequired'))
-        return
-      }
-      const projectId = vertexProjectId.value.trim()
-      if (projectId && !vertexLocation.value.trim()) {
-        appStore.showError(t('admin.accounts.vertexLocationRequired'))
-        return
-      }
-      const credentials: Record<string, unknown> = {
-        auth_mode: 'apikey',
-        api_key: vertexApiKey.value.trim(),
-        location: vertexLocation.value.trim() || 'global',
-        tier_id: 'vertex'
-      }
-      if (projectId) {
-        credentials.project_id = projectId
-      }
-      await createAccountAndFinish(form.platform, 'service_account' as AccountType, credentials)
-      return
-    }
     if (!parseVertexServiceAccountJson()) {
       return
     }
@@ -6105,9 +6034,23 @@ const handleSubmit = async () => {
     return
   }
 
+  // Never fall back to the public OpenAI endpoint for a CommandCode gateway.
+  if (commandCodePreset.value) {
+    try {
+      apiKeyBaseUrl.value = normalizeCommandCodeBaseUrl(apiKeyBaseUrl.value)
+      openaiPassthroughEnabled.value = true
+      poolModeEnabled.value = false
+    } catch (error) {
+      appStore.showError(error instanceof Error ? error.message : 'Invalid CommandCode adapter URL')
+      return
+    }
+  }
+
   // Determine default base URL based on platform
   const defaultBaseUrl =
-    form.platform === 'openai'
+    form.platform === 'commandcode'
+      ? 'https://api.commandcode.ai'
+      : form.platform === 'openai'
       ? 'https://api.openai.com'
       : form.platform === 'gemini'
         ? 'https://generativelanguage.googleapis.com'
@@ -6122,7 +6065,14 @@ const handleSubmit = async () => {
     base_url: apiKeyBaseUrl.value.trim() || defaultBaseUrl,
     api_key: apiKeyValue.value.trim()
   }
-  if (form.platform === 'gemini' && isOfficialGeminiBaseUrl(apiKeyBaseUrl.value)) {
+  const authorization = commandCodeAuthorization.value
+  if (form.platform === 'commandcode' && authorization && authorization.apiKey === credentials.api_key) {
+    credentials.user_id = authorization.userId
+    credentials.user_name = authorization.userName
+    credentials.key_name = authorization.keyName
+    if (authorization.planId) credentials.plan_type = authorization.planId
+  }
+  if (form.platform === 'gemini') {
     credentials.tier_id = geminiTierAIStudio.value
   }
 
@@ -6162,7 +6112,7 @@ const handleSubmit = async () => {
 
   // Add model mapping if configured（OpenAI 开启自动透传时不应用）
   if (!isOpenAIModelRestrictionDisabled.value) {
-    const modelMapping = buildModelMappingObject(modelRestrictionMode.value, allowedModels.value, modelMappings.value)
+    const modelMapping = buildModelMappingObject(form.platform === 'commandcode' ? 'combined' : modelRestrictionMode.value, allowedModels.value, modelMappings.value)
     if (modelMapping) {
       credentials.model_mapping = modelMapping
     }
@@ -6184,12 +6134,6 @@ const handleSubmit = async () => {
       credentials.pool_mode_retry_status_codes = parsedRetryStatusCodes
     }
   }
-
-  applyExplicitCacheUpstreamCredentials(
-    credentials,
-    form.platform === 'gemini' && !isOfficialGeminiBaseUrl(apiKeyBaseUrl.value) && explicitCacheUpstreamEnabled.value,
-    explicitCacheUpstreamMaxTTL.value
-  )
 
   // Add custom error codes if enabled
   if (customErrorCodesEnabled.value) {
