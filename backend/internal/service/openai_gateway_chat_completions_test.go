@@ -390,7 +390,11 @@ func TestForwardAsChatCompletions_StructuredInputRejectionDoesNotRetryIneligible
 		{name: "adaptive Chat ingress stays raw", platform: PlatformKimi, protocol: APIProtocolAdaptive, endpoint: "/chat/completions"},
 		{name: "adaptive Responses shaped ingress stays Responses", platform: PlatformKimi, protocol: APIProtocolAdaptive, responsesBody: true},
 		{name: "adaptive Responses shaped ingress converts to Chat", platform: PlatformZhipu, protocol: APIProtocolAdaptive, responsesBody: true, endpoint: "/chat/completions"},
-		{name: "model routed Responses is not OpenAI retry eligible", platform: PlatformCommandCode, protocol: APIProtocolResponses},
+		// Fork divergence: CommandCode accounts always use the native /alpha/generate
+		// gateway (openai_gateway_chat_completions.go), so a chat-shaped ingress never
+		// reaches the OpenAI-shaped /responses endpoint even when the account is
+		// model-routed (api_protocol=responses).
+		{name: "model routed Responses is not OpenAI retry eligible", platform: PlatformCommandCode, protocol: APIProtocolResponses, endpoint: "/alpha/generate"},
 		{name: "OAuth", accountType: AccountTypeOAuth},
 		{name: "authentication", status: http.StatusUnauthorized},
 		{name: "authorization", status: http.StatusForbidden},
