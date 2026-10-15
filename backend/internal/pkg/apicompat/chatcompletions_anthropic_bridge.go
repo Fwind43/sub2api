@@ -69,6 +69,25 @@ func AnthropicToChatCompletionsRequest(req *AnthropicRequest) (*ChatCompletionsR
 		out.MaxCompletionTokens = &v
 	}
 
+	// stop_sequences: Anthropic 最多允许 4 条停止序列，Chat Completions 的 stop
+	// 字段接受 string 或 []string（见 ChatCompletionsRequest.Stop）。此前该字段
+	// 被静默丢弃，客户端设置了停止序列也不会在上游生效。
+	if len(req.StopSeqs) > 0 {
+		seqs := make([]string, 0, len(req.StopSeqs))
+		for _, seq := range req.StopSeqs {
+			if trimmed := strings.TrimSpace(seq); trimmed != "" {
+				seqs = append(seqs, seq)
+			}
+		}
+		if len(seqs) > 0 {
+			stop, err := json.Marshal(seqs)
+			if err != nil {
+				return nil, fmt.Errorf("marshal stop_sequences: %w", err)
+			}
+			out.Stop = stop
+		}
+	}
+
 	// Tools: Anthropic input_schema is a JSON Schema, directly usable as Chat
 	// function parameters. Server tools (web_search_*) have no Chat Completions
 	// equivalent and are dropped (mirrors responsesToolsToChatTools).
