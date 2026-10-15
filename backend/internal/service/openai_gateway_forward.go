@@ -1351,7 +1351,17 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 }
 
 func shouldForwardOpenAIResponsesViaRawChatCompletions(account *Account) bool {
-	if account == nil || account.Type != AccountTypeAPIKey {
+	if account == nil {
+		return false
+	}
+	// ClinePass 上游只提供 OpenAI 兼容的 /chat/completions（且仅支持流式生成），
+	// 与账号类型无关（APIKey 与 OAuth 账号同理）：/v1/responses 与 /v1/messages
+	// 都必须走原生 CC 直转，否则会落到 Responses 上游端点（OAuth 账号会打到
+	// chatgptCodexURL）。
+	if account.Platform == PlatformClinePass {
+		return true
+	}
+	if account.Type != AccountTypeAPIKey {
 		return false
 	}
 	if account.routesByModel() {

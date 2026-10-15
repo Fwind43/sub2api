@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/gin-gonic/gin"
@@ -180,6 +181,53 @@ func (s *OpenAIGatewayService) bufferClinePassStream(
 	requestBodyLen int,
 ) (*OpenAIForwardResult, error) {
 	requestID := resp.Header.Get("x-request-id")
+	body, usage, firstTokenMs, err := s.aggregateClinePassStreamBody(c, resp, account, originalModel, upstreamModel, startTime)
+	if err != nil {
+		return nil, err
+	}
+	body = s.replaceModelInResponseBody(body, upstreamModel, originalModel)
+
+	if s.responseHeaderFilter != nil {
+		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
+	}
+	c.Writer.Header().Set("Content-Type", "application/json")
+	c.Writer.WriteHeader(http.StatusOK)
+	if _, werr := c.Writer.Write(body); werr != nil {
+		logger.L().Debug("clinepass: client disconnected while writing aggregated response",
+			zap.Error(werr), zap.String("request_id", requestID))
+	}
+
+	return &OpenAIForwardResult{
+		RequestID:                     requestID,
+		UpstreamHeaders:               resp.Header,
+		Usage:                         usage,
+		Model:                         originalModel,
+		BillingModel:                  billingModel,
+		UpstreamModel:                 upstreamModel,
+		UpstreamResponseModel:         observedUpstreamResponseModel(c),
+		UpstreamResponseModelConflict: observedUpstreamResponseModelConflict(c),
+		UpstreamResponseServiceTier:   observedUpstreamResponseServiceTier(c),
+		ReasoningEffort:               reasoningEffort,
+		ServiceTier:                   resolvedOpenAIUpstreamServiceTier(c, serviceTier),
+		Stream:                        false,
+		Duration:                      time.Since(startTime),
+		FirstTokenMs:                  firstTokenMs,
+	}, nil
+}
+
+// aggregateClinePassStreamBody drains a ClinePass SSE stream and folds it into a
+// single non-streaming Chat Completions JSON body. ClinePass only implements
+// streaming generation, so any non-streaming client request has to be
+// aggregated from the upstream stream.
+func (s *OpenAIGatewayService) aggregateClinePassStreamBody(
+	c *gin.Context,
+	resp *http.Response,
+	account *Account,
+	originalModel string,
+	upstreamModel string,
+	startTime time.Time,
+) ([]byte, OpenAIUsage, *int, error) {
+	requestID := resp.Header.Get("x-request-id")
 	observer := upstreamResponseModelObserverFromContext(c)
 	if observer == nil {
 		observer = beginUpstreamResponseModelObservation(c)
@@ -208,43 +256,66 @@ func (s *OpenAIGatewayService) bufferClinePassStream(
 
 	scanErr := scanner.Err()
 	if scanErr != nil && !errors.Is(scanErr, context.Canceled) && !errors.Is(scanErr, context.DeadlineExceeded) {
-		logger.L().Warn("clinepass: stream read error while aggregating non-stream response",
+		logger.L().Warn("clinepass: stream read error while aggregating upstream response",
 			zap.Error(scanErr),
 			zap.String("request_id", requestID),
 			zap.Int64("account_id", account.ID),
 		)
 	}
 	if !accumulator.sawData {
-		return nil, newOpenAIUpstreamStreamReadError(scanErr)
+		return nil, OpenAIUsage{}, nil, newOpenAIUpstreamStreamReadError(scanErr)
 	}
 
 	body := accumulator.build(upstreamModel, originalModel)
 	if routing := ParseClinePassRouting(body); routing != nil {
 		s.RecordClinePassRouting(c.Request.Context(), account.ID, originalModel, routing)
 	}
-	body = s.replaceModelInResponseBody(body, upstreamModel, originalModel)
+	return body, accumulator.usage, firstTokenMs, nil
+}
+
+// bufferClinePassStreamAsAnthropic serves a /v1/messages request with
+// stream=false on a ClinePass account: the upstream stream is aggregated into a
+// single Chat Completions body and then converted into an Anthropic Messages
+// response, keeping the client contract of the other CC fallback paths.
+func (s *OpenAIGatewayService) bufferClinePassStreamAsAnthropic(
+	c *gin.Context,
+	resp *http.Response,
+	account *Account,
+	originalModel string,
+	billingModel string,
+	upstreamModel string,
+	reasoningEffort *string,
+	serviceTier *string,
+	startTime time.Time,
+) (*OpenAIForwardResult, error) {
+	requestID := resp.Header.Get("x-request-id")
+	body, usage, firstTokenMs, err := s.aggregateClinePassStreamBody(c, resp, account, originalModel, upstreamModel, startTime)
+	if err != nil {
+		return nil, err
+	}
+
+	var ccResp apicompat.ChatCompletionsResponse
+	if uerr := json.Unmarshal(body, &ccResp); uerr != nil {
+		return nil, fmt.Errorf("clinepass: parse aggregated chat completions response: %w", uerr)
+	}
+	anthropicResp := apicompat.ChatCompletionsResponseToAnthropic(&ccResp, originalModel)
 
 	if s.responseHeaderFilter != nil {
 		responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	}
-	c.Writer.Header().Set("Content-Type", "application/json")
-	c.Writer.WriteHeader(http.StatusOK)
-	if _, werr := c.Writer.Write(body); werr != nil {
-		logger.L().Debug("clinepass: client disconnected while writing aggregated response",
-			zap.Error(werr), zap.String("request_id", requestID))
-	}
+	c.JSON(http.StatusOK, anthropicResp)
 
 	return &OpenAIForwardResult{
 		RequestID:                     requestID,
 		UpstreamHeaders:               resp.Header,
-		Usage:                         accumulator.usage,
+		Usage:                         usage,
 		Model:                         originalModel,
 		BillingModel:                  billingModel,
 		UpstreamModel:                 upstreamModel,
 		UpstreamResponseModel:         observedUpstreamResponseModel(c),
 		UpstreamResponseModelConflict: observedUpstreamResponseModelConflict(c),
-		UpstreamResponseServiceTier:   observedUpstreamResponseServiceTier(c),
 		ReasoningEffort:               reasoningEffort,
+		UpstreamResponseServiceTier:   observedUpstreamResponseServiceTier(c),
 		ServiceTier:                   resolvedOpenAIUpstreamServiceTier(c, serviceTier),
 		Stream:                        false,
 		Duration:                      time.Since(startTime),

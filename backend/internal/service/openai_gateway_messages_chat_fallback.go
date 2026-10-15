@@ -141,6 +141,11 @@ func (s *OpenAIGatewayService) forwardAnthropicViaRawChatCompletions(
 	if clientStream {
 		return s.streamChatCompletionsAsAnthropic(c, resp, originalModel, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
 	}
+	if account.Platform == PlatformClinePass {
+		// ClinePass 只实现流式生成：上游永远回 SSE，客户端要非流式时必须先把
+		// 流聚合回单个 Chat Completions 体，再转成 Anthropic Messages 响应。
+		return s.bufferClinePassStreamAsAnthropic(c, resp, account, originalModel, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
+	}
 	return s.bufferChatCompletionsAsAnthropic(c, resp, originalModel, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
 }
 
