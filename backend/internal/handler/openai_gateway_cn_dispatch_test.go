@@ -108,3 +108,32 @@ func TestAllowOpenAICompatibleMessagesDispatch_ClinePassExempt(t *testing.T) {
 	require.Empty(t, resolveOpenAIMessagesDispatchMappedModel(nil, standalone, "claude-sonnet-4-5-20250929"),
 		"clinepass 分组不得注入 openai 默认 gpt-5.x 映射")
 }
+
+// CommandCode 分组（独立或 composite 解析到 commandcode）:上游同样只有 OpenAI
+// 兼容的原生 Chat Completions(/alpha/generate),/v1/messages 必须由网关转换,
+// 故与 clinepass 同语义豁免 allow_messages_dispatch 闸门；调度级模型映射
+// (gpt-5.x 默认值)不得注入。
+func TestAllowOpenAICompatibleMessagesDispatch_CommandCodeExempt(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	standalone := &service.APIKey{Group: &service.Group{Platform: service.PlatformCommandCode, AllowMessagesDispatch: false}}
+	require.True(t, allowOpenAICompatibleMessagesDispatch(nil, standalone),
+		"commandcode 独立分组必须豁免 allow_messages_dispatch 闸门")
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest("POST", "/v1/messages", nil)
+	c.Request = c.Request.WithContext(service.WithResolvedTargetPlatform(c.Request.Context(), service.PlatformCommandCode))
+	composite := &service.APIKey{Group: &service.Group{Platform: service.PlatformComposite, AllowMessagesDispatch: false}}
+	require.True(t, allowOpenAICompatibleMessagesDispatch(c, composite),
+		"composite 解析到 commandcode 目标必须豁免")
+
+	// 非回归:composite 未解析出目标平台时仍拒绝。
+	cNone, _ := gin.CreateTestContext(httptest.NewRecorder())
+	cNone.Request = httptest.NewRequest("POST", "/v1/messages", nil)
+	require.False(t, allowOpenAICompatibleMessagesDispatch(cNone, composite))
+
+	require.Empty(t, resolveOpenAIMessagesDispatchMappedModel(nil, standalone, "claude-sonnet-4-5-20250929"),
+		"commandcode 分组不得注入 openai 默认 gpt-5.x 映射")
+	require.Empty(t, resolveOpenAIMessagesDispatchMappedModel(nil, standalone, "claude-opus-4-1"),
+		"commandcode 分组不得注入 openai 默认 gpt-5.x 映射")
+}

@@ -126,6 +126,16 @@ func IsClinePass(platform string) bool {
 	return platform == PlatformClinePass
 }
 
+// IsCommandCode 报告 platform 是否为 Command Code 网关。
+// Command Code 的原生端点为 /alpha/generate（Chat Completions）与 /v1/responses，
+// 由 CC 管线单独处理。本谓词用于把"入站 /v1/messages 闸门豁免 + 调度级模型映射
+// 跳过"与 ClinePass 对齐：这两个平台的分组配置会被 sanitize 置空
+// （allow_messages_dispatch 恒 false、messages_dispatch_model_config 恒空），
+// 不做豁免则 /v1/messages 永远 403，且默认 gpt-5.x 映射会被注入。
+func IsCommandCode(platform string) bool {
+	return platform == PlatformCommandCode
+}
+
 // IsMultiProtocolAPIKeyProvider 报告 platform 是否为多协议 API Key 网关
 // （国产供应商 + OpenCode）：走 OpenAI 网关、支持 adaptive 协议分流。
 // 归属以 provider profile 登记为准（见 provider_profile.go）。
