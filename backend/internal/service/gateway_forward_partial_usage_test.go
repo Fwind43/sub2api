@@ -296,7 +296,51 @@ func TestGatewayService_Forward_PostOutputSSEOverloadedErrorKeepsExistingStatus(
 
 	var failoverErr *UpstreamFailoverError
 	require.ErrorAs(t, err, &failoverErr)
-	require.Equal(t, http.StatusForbidden, failoverErr.StatusCode)
+	// 流已开始且错误帧未声明 status：按 502（网关/流中断）处理，
+	// 不再默认 403，否则客户端只会看到误导性的 "Upstream access forbidden"。
+	require.Equal(t, http.StatusBadGateway, failoverErr.StatusCode)
+	require.JSONEq(t, errorJSON, string(failoverErr.ResponseBody))
+	require.Zero(t, repo.tempCalls)
+	require.Contains(t, rec.Body.String(), "message_start")
+}
+
+func TestGatewayService_Forward_PostOutputSSEErrorUsesDeclaredStatus(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	body := []byte(`{"model":"claude-3-5-sonnet-latest","stream":true,"messages":[{"role":"user","content":"hello"}]}`)
+	parsed, err := ParseGatewayRequest(NewRequestBodyRef(body), PlatformAnthropic)
+	require.NoError(t, err)
+
+	const errorJSON = `{"type":"error","error":{"type":"api_error","message":"upstream_stream_interrupted","code":"upstream_stream_interrupted","status":503}}`
+	fixture := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":1}}}\n\n" +
+		"event: error\ndata: " + errorJSON + "\n\n"
+	upstream := &anthropicHTTPUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader(fixture)),
+	}}
+	repo := &gatewayForwardErrorPolicyRepoStub{}
+	cfg := &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}
+	svc := &GatewayService{
+		cfg:                  cfg,
+		responseHeaderFilter: compileResponseHeaderFilter(cfg),
+		httpUpstream:         upstream,
+		rateLimitService:     NewRateLimitService(repo, nil, cfg, nil, nil),
+		deferredService:      &DeferredService{},
+	}
+
+	result, err := svc.Forward(context.Background(), c, newAnthropicOAuthAccountForPartialUsageTest(), parsed)
+	require.Error(t, err)
+	require.Nil(t, result)
+
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	// 错误帧自身声明的 status 优先于默认 502。
+	require.Equal(t, http.StatusServiceUnavailable, failoverErr.StatusCode)
 	require.JSONEq(t, errorJSON, string(failoverErr.ResponseBody))
 	require.Zero(t, repo.tempCalls)
 	require.Contains(t, rec.Body.String(), "message_start")
