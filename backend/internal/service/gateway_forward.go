@@ -825,7 +825,11 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 			if errors.As(err, &sseErr) {
 				// 上游 HTTP 200 + SSE 流体内出现 event:error 帧。
 				body := []byte(sseErr.RawData)
-				semanticStatus := http.StatusForbidden
+				// 语义状态码优先取错误帧自身声明的 status（vm2api 等上游会在
+				// error 帧里带 status）；缺失时按 502 处理——上游 HTTP 200 但
+				// 流内报错属于网关/流中断，不应默认成 403 访问拒绝，否则客户端
+				// 只会看到误导性的 "Upstream access forbidden"。
+				semanticStatus := sseErrorEventSemanticStatus(body)
 				if c.Writer.Size() == writerSizeBeforeStream && gjson.GetBytes(body, "error.type").String() == "overloaded_error" {
 					semanticStatus = 529
 					syntheticResp := &http.Response{
@@ -1063,4 +1067,15 @@ func (s *GatewayService) isStickyAccountUpstreamRestricted(ctx context.Context, 
 		return false
 	}
 	return s.isUpstreamModelRestrictedByChannel(ctx, *groupID, account, requestedModel)
+}
+
+// sseErrorEventSemanticStatus 推导上游 SSE error 帧的 HTTP 语义状态码。
+// 帧内显式声明的 error.status（400-599）优先；缺失时返回 502：
+// 上游已返回 HTTP 200、仅在流内报错，说明是网关/流中断类失败，
+// 不能默认按 403 访问拒绝处理。
+func sseErrorEventSemanticStatus(body []byte) int {
+	if declared := int(gjson.GetBytes(body, "error.status").Int()); declared >= 400 && declared <= 599 {
+		return declared
+	}
+	return http.StatusBadGateway
 }
