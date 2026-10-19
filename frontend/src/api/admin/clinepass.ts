@@ -194,6 +194,7 @@ export interface ClinePassUpstreamPinConfig {
   sort?: string
   pipelines?: '' | 'both' | 'vercel' | 'openrouter'
   match_prefixes?: string[]
+  /** Exact model IDs or non-empty prefixes ending in *; exact > longest prefix > defaults. */
   models?: Record<string, Partial<ClinePassUpstreamPinConfig>>
 }
 

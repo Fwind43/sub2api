@@ -148,38 +148,31 @@ func clinePassPinDedupeLower(list []string) []string {
 	return out
 }
 
-// effectiveForModel merges a per-model override over the top-level fields.
-// Model keys may be written bare ("deepseek-v4-pro") or vendor-qualified
-// ("cline-pass/deepseek-v4-pro"); both forms match the outbound model id.
+// effectiveForModel merges one model rule over the top-level fields.
+// Bare and cline-pass/ qualified keys are aliases. Exact IDs win over trailing-*
+// prefix rules; otherwise the longest matching prefix wins, then defaults.
 func (c *ClinePassUpstreamPinConfig) effectiveForModel(model string) *ClinePassUpstreamPinConfig {
 	eff := *c
 	eff.Models = nil
-	if len(c.Models) == 0 {
-		return &eff
-	}
-	stripped := clinePassStripModelPrefix(model)
+	stripped := clinePassStripModelPrefix(strings.TrimSpace(model))
 	var override *ClinePassUpstreamPinConfig
-	for key := range c.Models {
-		k := strings.TrimSpace(key)
+	bestPrefixLen := -1
+	for key, rule := range c.Models {
+		k := clinePassStripModelPrefix(strings.TrimSpace(key))
 		if k == "" {
 			continue
 		}
-		if k == model {
-			m := c.Models[key]
+		if k == stripped {
+			m := rule
 			override = &m
 			break
 		}
-	}
-	if override == nil {
-		for key := range c.Models {
-			k := strings.TrimSpace(key)
-			if k == "" {
-				continue
-			}
-			if clinePassStripModelPrefix(k) == stripped {
-				m := c.Models[key]
+		if strings.Count(k, "*") == 1 && strings.HasSuffix(k, "*") {
+			prefix := strings.TrimSuffix(k, "*")
+			if prefix != "" && strings.HasPrefix(stripped, prefix) && len(prefix) > bestPrefixLen {
+				m := rule
 				override = &m
-				break
+				bestPrefixLen = len(prefix)
 			}
 		}
 	}

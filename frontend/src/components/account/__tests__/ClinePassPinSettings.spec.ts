@@ -24,6 +24,31 @@ const mountStatus = (accountId = 1) => {
 const verdict = 'admin.accounts.clinepassPin.lastKnown'
 
 describe('ClinePass platform-only routing diagnostics', () => {
+  it.each([
+    ['deepseek-v3', 'deepseek', true],
+    ['cline-pass/deepseek-v4-pro', 'novita', true],
+    ['deepseek-v4.1-flash', 'exact', true],
+    ['deepseek-v4.1-flash', 'novita', false],
+    ['cline-pass/glm-5.3-flash', 'z-ai', true],
+    ['glm-disabled-test', 'z-ai', null],
+    ['cline-free/glm-5.3-flash', 'z-ai', null]
+  ])('uses the same prefix priority for %s / %s', async (model, provider, matched) => {
+    vi.mocked(getUpstreamPin).mockResolvedValue({ config: {
+      mode: 'strict', match_prefixes: ['fallback'], models: {
+        'deepseek*': { upstream: 'deepseek' }, 'deepseek-v4*': { upstream: 'novita' },
+        'deepseek-v4.1-flash': { upstream: 'exact' }, 'cline-pass/glm*': { upstream: 'z-ai' },
+        'glm-disabled*': { mode: 'off' }
+      }
+    } })
+    vi.mocked(listLastKnown).mockResolvedValue({ account_id: 1, items: [{ ...observation, model, provider }] })
+    const wrapper = mountStatus()
+    await flushPromises()
+    if (matched === null) {
+      expect(wrapper.find('[data-testid="clinepass-lastknown-verdict"]').exists()).toBe(false)
+    } else {
+      expect(wrapper.get('[data-testid="clinepass-lastknown-verdict"]').text()).toBe(verdict + (matched ? 'Match' : 'Mismatch'))
+    }
+  })
   beforeEach(() => {
     vi.resetAllMocks()
     vi.mocked(getUpstreamPin).mockResolvedValue({

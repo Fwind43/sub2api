@@ -62,6 +62,11 @@ func TestClinePassModelRuleBypassesOnlyDefaultPrefix(t *testing.T) {
 
 func TestValidateClinePassMultiModelRules(t *testing.T) {
 	for name, models := range map[string]map[string]ClinePassUpstreamPinConfig{
+		"wildcard-only":    {"*": {Upstream: "a"}},
+		"wildcard-alias":   {"cline-pass/*": {Upstream: "a"}},
+		"wildcard-middle":  {"glm*flash": {Upstream: "a"}},
+		"wildcard-double":  {"glm**": {Upstream: "a"}},
+		"duplicate-prefix": {"glm*": {Upstream: "a"}, "cline-pass/glm*": {Upstream: "b"}},
 		"empty-id":         {" ": {Upstream: "a"}},
 		"prefix-only":      {"cline-pass/": {Upstream: "a"}},
 		"duplicate-alias":  {"glm": {Upstream: "a"}, "cline-pass/glm": {Upstream: "b"}},
@@ -82,4 +87,53 @@ func TestValidateClinePassMultiModelRules(t *testing.T) {
 	require.NoError(t, validateClinePassUpstreamPin(&ClinePassUpstreamPinConfig{
 		Models: map[string]ClinePassUpstreamPinConfig{"glm": {Only: []string{"a", "b"}}},
 	}))
+}
+
+func TestClinePassPlatformPrefixRules(t *testing.T) {
+	cfg := &ClinePassUpstreamPinConfig{
+		Mode: "strict", Upstream: "default", MatchPrefixes: []string{"fallback"},
+		Models: map[string]ClinePassUpstreamPinConfig{
+			"deepseek*":                 {Upstream: "deepseek"},
+			"deepseek-v4*":              {Upstream: "novita"},
+			"deepseek-v4.1-flash":       {Upstream: "exact"},
+			"deepseek-disabled*":        {Mode: "off"},
+			"deepseek-disabled-special": {Upstream: "enabled-exact"},
+			"cline-pass/glm*":           {Upstream: "z-ai"},
+			"glm-5.3-off":               {Mode: "off"},
+		},
+	}
+	require.NoError(t, validateClinePassUpstreamPin(cfg))
+	raw, err := json.Marshal(cfg)
+	require.NoError(t, err)
+	loaded, err := ParseClinePassUpstreamPinJSON(string(raw))
+	require.NoError(t, err)
+	for model, provider := range map[string]string{
+		"deepseek-v3": "deepseek", "deepseek": "deepseek",
+		"deepseek-v4-pro": "novita", "cline-pass/deepseek-v4-pro": "novita",
+		"deepseek-v4.1-flash": "exact", "cline-pass/deepseek-v4.1-flash": "exact",
+		"glm-5.3-flash": "z-ai", "cline-pass/glm-5.3-pro": "z-ai",
+		"deepseek-disabled-test": "", "deepseek-disabled-special": "enabled-exact", "glm-5.3-off": "",
+		"fallback-test": "default", "other": "", "not-deepseek-v4-pro": "",
+		"cline-free/deepseek-v4-pro": "", "cline-free/glm-5.3-flash": "",
+	} {
+		t.Run(model, func(t *testing.T) {
+			body, err := json.Marshal(map[string]string{"model": model})
+			require.NoError(t, err)
+			out := ApplyClinePassUpstreamPinWithPlatform(newClinePassPinAccount(nil), loaded, body)
+			if provider == "" {
+				require.Equal(t, body, out)
+			} else {
+				for _, path := range []string{"providerOptions.gateway.only", "provider.only"} {
+					require.JSONEq(t, `["`+provider+`"]`, gjson.GetBytes(out, path).Raw)
+				}
+			}
+			require.JSONEq(t, string(out), string(ApplyClinePassUpstreamPinWithPlatform(newClinePassPinAccount(nil), loaded, out)))
+		})
+	}
+	// Matching must not mutate the shared platform config across requests.
+	after, err := json.Marshal(loaded)
+	require.NoError(t, err)
+	before, err := json.Marshal(cfg.normalize())
+	require.NoError(t, err)
+	require.JSONEq(t, string(before), string(after))
 }

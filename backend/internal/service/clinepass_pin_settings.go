@@ -75,6 +75,9 @@ func validateClinePassUpstreamPin(cfg *ClinePassUpstreamPinConfig) error {
 		if key == "" || base == "" || seen[base] {
 			return infraerrors.BadRequest("CLINEPASS_PIN_INVALID_MODEL", "model IDs must be non-empty and unique (including bare/prefixed aliases)")
 		}
+		if strings.Contains(base, "*") && (strings.Count(base, "*") != 1 || !strings.HasSuffix(base, "*") || base == "*") {
+			return infraerrors.BadRequest("CLINEPASS_PIN_INVALID_MODEL", "model prefixes must be non-empty and use a single trailing * (for example deepseek*)")
+		}
 		seen[base] = true
 		if len(rule.Models) > 0 {
 			return infraerrors.BadRequest("CLINEPASS_PIN_INVALID_MODEL", "nested model rules are not supported")

@@ -38,6 +38,58 @@ beforeEach(() => {
 afterEach(() => { wrappers.splice(0).forEach(wrapper => wrapper.unmount()) })
 
 describe('ClinePass platform model routing editor', () => {
+  it('saves multiple independent prefixes and an exact override', async () => {
+    const w = await mountCard()
+    for (const [model, provider] of [['deepseek*', 'deepseek'], ['glm*', 'z-ai'], ['deepseek-v4.1-flash', 'novita']]) {
+      await w.get('[data-testid="pin-add-model"]').trigger('click')
+      const row = w.findAll('[data-testid="pin-model-row"]').at(-1)!
+      await row.get('[data-testid="pin-model-id"]').setValue(model)
+      await row.get('[data-testid="pin-model-upstream"]').setValue(provider)
+    }
+    await w.get('[data-testid="pin-save"]').trigger('click')
+    await flushPromises()
+    expect(updateUpstreamPin).toHaveBeenCalledWith(expect.objectContaining({
+      models: {
+        'deepseek*': expect.objectContaining({ upstream: 'deepseek' }),
+        'glm*': expect.objectContaining({ upstream: 'z-ai' }),
+        'deepseek-v4.1-flash': expect.objectContaining({ upstream: 'novita' })
+      }
+    }))
+    expect(w.text()).toContain('最长前缀')
+  })
+
+  it.each(['*', 'cline-pass/*', 'glm*flash', 'glm**'])('rejects invalid model pattern %s before save or probe', async model => {
+    const w = await mountCard({ mode: 'strict', models: { [model]: { upstream: 'a' } } })
+    await w.get('[data-testid="pin-save"]').trigger('click')
+    await w.get('[data-testid="pin-model-probe"]').trigger('click')
+    await flushPromises()
+    expect(updateUpstreamPin).not.toHaveBeenCalled()
+    expect(probeUpstreams).not.toHaveBeenCalled()
+    expect(w.text()).toContain('前缀')
+  })
+
+  it('probes a concrete model inside a prefix without changing the saved prefix', async () => {
+    const w = await mountCard({ mode: 'strict', models: { 'glm*': { upstream: 'z-ai' } } })
+    await w.get('[data-testid="pin-model-probe"]').trigger('click')
+    expect(probeUpstreams).not.toHaveBeenCalled()
+    await w.get('[data-testid="pin-model-probe-id"]').setValue('deepseek-v4.1-flash')
+    await w.get('[data-testid="pin-model-probe"]').trigger('click')
+    expect(probeUpstreams).not.toHaveBeenCalled()
+    await w.get('[data-testid="pin-model-probe-id"]').setValue('cline-pass/glm-5.3-flash')
+    await w.get('[data-testid="pin-model-probe"]').trigger('click')
+    await flushPromises()
+    expect(probeUpstreams).toHaveBeenCalledWith(17, 'cline-pass/glm-5.3-flash')
+    await w.get('[data-testid="pin-save"]').trigger('click')
+    await flushPromises()
+    expect(updateUpstreamPin).toHaveBeenCalledWith(expect.objectContaining({ models: { 'glm*': expect.objectContaining({ upstream: 'z-ai' }) } }))
+  })
+
+  it('blocks duplicate prefix aliases before saving', async () => {
+    const w = await mountCard({ mode: 'strict', models: { 'glm*': { upstream: 'a' }, 'cline-pass/glm*': { upstream: 'b' } } })
+    await w.get('[data-testid="pin-save"]').trigger('click')
+    expect(updateUpstreamPin).not.toHaveBeenCalled()
+    expect(w.text()).toContain('模型重复')
+  })
   it('adds model-only strict rules and saves separate providers on both pipelines', async () => {
     const w = await mountCard()
     for (const [model, provider] of [['deepseek-v4-pro', 'deepseek'], ['glm-5.3', 'z-ai']]) {

@@ -84,8 +84,15 @@ const expectedProviders = (model: string): string[] => {
   const id = model.trim()
   const base = modelBase(id).toLowerCase()
   if (id.toLowerCase().startsWith('cline-free') || base.startsWith('cline-free')) return []
-  const override = Object.entries(pin.models || {}).find(([key]) => key.trim() === id)?.[1]
-    || Object.entries(pin.models || {}).find(([key]) => modelBase(key) === modelBase(id))?.[1]
+  const canonicalModel = (value: string): string => value.trim().replace(/^cline-pass\//, '')
+  const modelID = canonicalModel(id)
+  const rules = Object.entries(pin.models || {})
+  const override = rules.find(([key]) => canonicalModel(key) === modelID)?.[1]
+    || rules.filter(([key]) => {
+      const pattern = canonicalModel(key)
+      return pattern.endsWith('*') && pattern.indexOf('*') === pattern.length - 1
+        && pattern.length > 1 && modelID.startsWith(pattern.slice(0, -1))
+    }).sort(([a], [b]) => canonicalModel(b).length - canonicalModel(a).length)[0]?.[1]
   // Like the backend, only non-empty override fields replace inherited values.
   const config = { ...pin, ...Object.fromEntries(Object.entries(override || {}).filter(([, value]) =>
     Array.isArray(value) ? value.length > 0 : typeof value === 'string' && value !== ''

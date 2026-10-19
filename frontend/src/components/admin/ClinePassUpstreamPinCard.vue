@@ -29,15 +29,15 @@
           </label>
         </div>
         <p class="text-xs text-gray-500 dark:text-gray-400">
-          默认规则只作用于命中前缀的模型；下方精确模型规则优先于默认规则，不受默认前缀限制。未配置的模型保持原路由；cline-free 模型不会钉定。已有高级路由字段会保留。
+          默认规则只作用于命中前缀的模型；下方模型 / 前缀规则优先于默认规则，不受默认前缀限制。未配置的模型保持原路由；cline-free 模型不会钉定。已有高级路由字段会保留。
         </p>
         <section class="space-y-3 rounded-lg border border-gray-200 p-4 dark:border-dark-600">
           <div class="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h3 class="font-medium">逐模型固定渠道</h3>
-              <p class="mt-1 text-xs text-gray-500">填写完整模型 ID（可带 cline-pass/），添加多行可为多个模型分别指定渠道。</p>
+              <h3 class="font-medium">模型 / 前缀固定渠道</h3>
+              <p class="mt-1 text-xs text-gray-500">每行可填完整模型 ID 或以 * 结尾的前缀，例如 deepseek* → deepseek、glm* → z-ai（也可带 cline-pass/）。匹配顺序：精确模型 &gt; 最长前缀 &gt; 默认规则。</p>
             </div>
-            <button type="button" class="btn btn-secondary btn-sm" data-testid="pin-add-model" @click="addRow">添加模型</button>
+            <button type="button" class="btn btn-secondary btn-sm" data-testid="pin-add-model" @click="addRow">添加规则</button>
           </div>
           <div class="flex flex-wrap items-end gap-3 rounded-lg bg-gray-50 p-3 dark:bg-dark-800">
             <label class="min-w-0 flex-1 text-sm">
@@ -62,8 +62,8 @@
           <div v-for="row in rows" :key="row.key" class="space-y-3 rounded-lg border border-gray-200 p-3 dark:border-dark-600" data-testid="pin-model-row">
             <div class="grid items-end gap-3 md:grid-cols-12">
               <label class="block text-sm md:col-span-4">
-                <span class="input-label">模型 ID</span>
-                <input v-model="row.model" class="input w-full" placeholder="例如 deepseek-v4.1-flash" data-testid="pin-model-id" @input="clearProbe(row)" />
+                <span class="input-label">模型 ID / 前缀（末尾加 *）</span>
+                <input v-model="row.model" class="input w-full" placeholder="例如 deepseek* 或 glm-5.3-flash" data-testid="pin-model-id" @input="clearProbe(row)" />
               </label>
               <label class="block text-sm md:col-span-3">
                 <span class="input-label">固定上游渠道</span>
@@ -88,6 +88,11 @@
                 </select>
               </label>
             </div>
+            <label v-if="row.model.trim().endsWith('*')" class="block text-sm">
+              <span class="input-label">探测用完整模型 ID（仅本次探测，不改变前缀规则）</span>
+              <input v-model="row.probeInput" class="input w-full" placeholder="填写该前缀下的具体模型，例如 deepseek-v4.1-flash" data-testid="pin-model-probe-id" @input="clearProbe(row)" />
+              <span class="mt-1 block text-xs text-gray-500">探测结果仅代表此具体模型，其他同前缀模型的可用渠道可能不同。</span>
+            </label>
             <div class="flex flex-wrap items-center gap-2">
               <button type="button" class="btn btn-secondary btn-sm" :disabled="!probeAccountId || !row.model.trim() || probing" data-testid="pin-model-probe" @click="probeOne(row)">探测渠道</button>
               <button type="button" class="btn btn-secondary btn-sm" data-testid="pin-model-remove" @click="removeRow(row)">移除规则</button>
@@ -141,6 +146,7 @@ interface ModelRow {
   probing: boolean
   probeVersion: number
   probeModel: string
+  probeInput: string
   probeError: string
   result: ClinePassUpstreamProbeResult | null
 }
@@ -169,12 +175,20 @@ let alive = true
 let accountLoadVersion = 0
 const message = (value: unknown): string => value instanceof Error ? value.message : String(value)
 const canonicalModel = (model: string): string => model.trim().replace(/^cline-pass\//, '')
+const modelPatternError = (model: string): string => {
+  const canonical = canonicalModel(model)
+  if (!canonical) return '每条规则都需要填写模型 ID 或前缀。'
+  if (canonical.includes('*') && (canonical.indexOf('*') !== canonical.length - 1 || canonical.length === 1)) {
+    return '前缀必须非空且只能在末尾使用一个 *（例如 deepseek*）。'
+  }
+  return ''
+}
 
 function makeRow(model = '', config: ClinePassUpstreamPinConfig = { mode: 'strict', pipelines: 'both' }): ModelRow {
   return {
     key: ++nextKey, model, upstream: config.upstream || '', mode: config.mode || '',
     pipelines: config.pipelines || '', original: config, probing: false, probeVersion: 0,
-    probeModel: '', probeError: '', result: null
+    probeModel: '', probeInput: '', probeError: '', result: null
   }
 }
 function applyConfig(config: ClinePassUpstreamPinConfig | null) {
@@ -244,10 +258,21 @@ async function loadAccounts() {
   }
 }
 async function probeRow(row: ModelRow) {
-  const model = row.model.trim()
+  const pattern = row.model.trim()
+  const probeInput = row.probeInput.trim()
+  const model = pattern.endsWith('*') ? probeInput : pattern
   const accountId = probeAccountId.value
-  if (!accountId || !model) {
-    row.probeError = '请先选择账号并填写模型 ID。'
+  const patternError = modelPatternError(pattern)
+  if (!accountId || patternError) {
+    row.probeError = patternError || '请先选择探测账号。'
+    return
+  }
+  if (!canonicalModel(model) || model.includes('*')) {
+    row.probeError = '前缀规则探测需填写不含 * 的完整模型 ID。'
+    return
+  }
+  if (pattern.endsWith('*') && !canonicalModel(model).startsWith(canonicalModel(pattern).slice(0, -1))) {
+    row.probeError = '探测模型 ID 必须匹配该规则的前缀。'
     return
   }
   const version = ++row.probeVersion
@@ -255,7 +280,7 @@ async function probeRow(row: ModelRow) {
   row.result = null
   row.probeError = ''
   row.probeModel = ''
-  const isCurrent = () => alive && row.probeVersion === version && row.model.trim() === model
+  const isCurrent = () => alive && row.probeVersion === version && row.model.trim() === pattern && row.probeInput.trim() === probeInput
     && probeAccountId.value === accountId && rows.value.some(item => item.key === row.key)
   try {
     const result = await probeUpstreams(accountId, model)
@@ -294,7 +319,8 @@ function buildPayload(): ClinePassUpstreamPinConfig {
   for (const row of rows.value) {
     const model = row.model.trim()
     const canonical = canonicalModel(model)
-    if (!canonical) throw new Error('每条规则都需要填写模型 ID。')
+    const patternError = modelPatternError(model)
+    if (patternError) throw new Error(patternError)
     if (seen.has(canonical)) throw new Error(`模型重复：${model}（裸名称与 cline-pass/ 名称视为同一模型）`)
     seen.add(canonical)
     if (row.mode !== 'off' && model.toLowerCase().startsWith('cline-free')) throw new Error('cline-free 模型不支持钉定。')
