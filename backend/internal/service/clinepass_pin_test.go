@@ -18,41 +18,33 @@ func newClinePassPinAccount(extra map[string]any) *Account {
 	}
 }
 
-func pinExtra(t *testing.T, cfg map[string]any) map[string]any {
+func pinConfig(t *testing.T, cfg map[string]any) *ClinePassUpstreamPinConfig {
 	t.Helper()
-	return map[string]any{ClinePassUpstreamPinExtraKey: cfg}
+	raw, err := json.Marshal(cfg)
+	require.NoError(t, err)
+	parsed, err := ParseClinePassUpstreamPinJSON(string(raw))
+	require.NoError(t, err)
+	return parsed
 }
 
-func TestApplyClinePassUpstreamPinNoConfigPassthrough(t *testing.T) {
-	body := []byte(`{"model":"deepseek-v4-pro","messages":[]}`)
-
-	// nil account
-	require.Equal(t, body, ApplyClinePassUpstreamPin(nil, body))
-
-	// account without extra
-	require.Equal(t, body, ApplyClinePassUpstreamPin(newClinePassPinAccount(nil), body))
-
-	// extra without the pin key
-	acct := newClinePassPinAccount(map[string]any{"other": true})
-	require.Equal(t, body, ApplyClinePassUpstreamPin(acct, body))
-
-	// mode=off disables everything
-	off := newClinePassPinAccount(pinExtra(t, map[string]any{"mode": "off", "upstream": "morph"}))
-	require.Equal(t, body, ApplyClinePassUpstreamPin(off, body))
-
-	// malformed config fails open
-	bad := newClinePassPinAccount(map[string]any{ClinePassUpstreamPinExtraKey: "{not-json"})
-	require.Equal(t, body, ApplyClinePassUpstreamPin(bad, body))
+func TestApplyClinePassUpstreamPinNoop(t *testing.T) {
+	body := []byte(`{"model":"deepseek-v4-pro"}`)
+	cfg := &ClinePassUpstreamPinConfig{Mode: "strict", Upstream: "deepseek"}
+	require.Equal(t, body, ApplyClinePassUpstreamPinWithPlatform(nil, cfg, body))
+	acct := newClinePassPinAccount(nil)
+	acct.Platform = PlatformOpenAI
+	require.Equal(t, body, ApplyClinePassUpstreamPinWithPlatform(acct, cfg, body))
+	require.Empty(t, ApplyClinePassUpstreamPinWithPlatform(newClinePassPinAccount(nil), cfg, nil))
 }
 
 func TestApplyClinePassUpstreamPinStrictBothPipelines(t *testing.T) {
-	acct := newClinePassPinAccount(pinExtra(t, map[string]any{
+	acct := pinConfig(t, map[string]any{
 		"mode":     "strict",
 		"upstream": "morph",
-	}))
+	})
 	body := []byte(`{"model":"deepseek-v4-pro","messages":[]}`)
 
-	out := ApplyClinePassUpstreamPin(acct, body)
+	out := ApplyClinePassUpstreamPinWithPlatform(newClinePassPinAccount(nil), acct, body)
 
 	require.Equal(t, "morph", gjson.GetBytes(out, "providerOptions.gateway.only.0").String())
 	require.Equal(t, "morph", gjson.GetBytes(out, "provider.only.0").String())
@@ -62,15 +54,15 @@ func TestApplyClinePassUpstreamPinStrictBothPipelines(t *testing.T) {
 }
 
 func TestApplyClinePassUpstreamPinPreferredOrder(t *testing.T) {
-	acct := newClinePassPinAccount(pinExtra(t, map[string]any{
+	acct := pinConfig(t, map[string]any{
 		"mode":     "preferred",
 		"upstream": "morph",
 		"order":    []string{"anthropic", "openai"},
 		"only":     []string{"morph", "anthropic", "openai", "google"},
-	}))
+	})
 	body := []byte(`{"model":"deepseek-v4-pro"}`)
 
-	out := ApplyClinePassUpstreamPin(acct, body)
+	out := ApplyClinePassUpstreamPinWithPlatform(newClinePassPinAccount(nil), acct, body)
 
 	require.Equal(t, "morph", gjson.GetBytes(out, "providerOptions.gateway.order.0").String())
 	require.Equal(t, "anthropic", gjson.GetBytes(out, "providerOptions.gateway.order.1").String())
@@ -83,13 +75,13 @@ func TestApplyClinePassUpstreamPinPreferredOrder(t *testing.T) {
 }
 
 func TestApplyClinePassUpstreamPinExcludeExpandedToOnly(t *testing.T) {
-	acct := newClinePassPinAccount(pinExtra(t, map[string]any{
+	acct := pinConfig(t, map[string]any{
 		"exclude":   []string{"openai"},
 		"upstreams": []string{"morph", "openai", "anthropic"},
-	}))
+	})
 	body := []byte(`{"model":"deepseek-v4-pro"}`)
 
-	out := ApplyClinePassUpstreamPin(acct, body)
+	out := ApplyClinePassUpstreamPinWithPlatform(newClinePassPinAccount(nil), acct, body)
 
 	only := gjson.GetBytes(out, "providerOptions.gateway.only").Array()
 	require.Len(t, only, 2)
@@ -101,19 +93,19 @@ func TestApplyClinePassUpstreamPinExcludeExpandedToOnly(t *testing.T) {
 }
 
 func TestApplyClinePassUpstreamPinSortBothPipelines(t *testing.T) {
-	acct := newClinePassPinAccount(pinExtra(t, map[string]any{
+	acct := pinConfig(t, map[string]any{
 		"sort": "cost",
-	}))
+	})
 	body := []byte(`{"model":"deepseek-v4-pro"}`)
 
-	out := ApplyClinePassUpstreamPin(acct, body)
+	out := ApplyClinePassUpstreamPinWithPlatform(newClinePassPinAccount(nil), acct, body)
 
 	require.Equal(t, "cost", gjson.GetBytes(out, "providerOptions.gateway.sort").String())
 	require.Equal(t, "price", gjson.GetBytes(out, "provider.sort").String())
 
 	// ttft and tps aliases
 	for raw, alias := range map[string]string{"ttft": "latency", "tps": "throughput"} {
-		out2 := ApplyClinePassUpstreamPin(newClinePassPinAccount(pinExtra(t, map[string]any{"sort": raw})), body)
+		out2 := ApplyClinePassUpstreamPinWithPlatform(newClinePassPinAccount(nil), pinConfig(t, map[string]any{"sort": raw}), body)
 		require.Equal(t, raw, gjson.GetBytes(out2, "providerOptions.gateway.sort").String())
 		require.Equal(t, alias, gjson.GetBytes(out2, "provider.sort").String())
 	}
@@ -122,23 +114,23 @@ func TestApplyClinePassUpstreamPinSortBothPipelines(t *testing.T) {
 func TestApplyClinePassUpstreamPinPipelineSelection(t *testing.T) {
 	body := []byte(`{"model":"deepseek-v4-pro"}`)
 
-	vercel := newClinePassPinAccount(pinExtra(t, map[string]any{
+	vercel := pinConfig(t, map[string]any{
 		"mode": "strict", "upstream": "morph", "pipelines": "vercel",
-	}))
-	out := ApplyClinePassUpstreamPin(vercel, body)
+	})
+	out := ApplyClinePassUpstreamPinWithPlatform(newClinePassPinAccount(nil), vercel, body)
 	require.True(t, gjson.GetBytes(out, "providerOptions.gateway.only").Exists())
 	require.False(t, gjson.GetBytes(out, "provider").Exists())
 
-	openrouter := newClinePassPinAccount(pinExtra(t, map[string]any{
+	openrouter := pinConfig(t, map[string]any{
 		"mode": "strict", "upstream": "morph", "pipelines": "openrouter",
-	}))
-	out = ApplyClinePassUpstreamPin(openrouter, body)
+	})
+	out = ApplyClinePassUpstreamPinWithPlatform(newClinePassPinAccount(nil), openrouter, body)
 	require.False(t, gjson.GetBytes(out, "providerOptions.gateway").Exists())
 	require.Equal(t, "morph", gjson.GetBytes(out, "provider.only.0").String())
 }
 
 func TestApplyClinePassUpstreamPinPerModelOverride(t *testing.T) {
-	acct := newClinePassPinAccount(pinExtra(t, map[string]any{
+	acct := pinConfig(t, map[string]any{
 		"mode":     "strict",
 		"upstream": "morph",
 		"models": map[string]any{
@@ -147,27 +139,27 @@ func TestApplyClinePassUpstreamPinPerModelOverride(t *testing.T) {
 				"mode": "off",
 			},
 		},
-	}))
+	})
 
-	out := ApplyClinePassUpstreamPin(acct, []byte(`{"model":"deepseek-v4-pro"}`))
+	out := ApplyClinePassUpstreamPinWithPlatform(newClinePassPinAccount(nil), acct, []byte(`{"model":"deepseek-v4-pro"}`))
 	require.Equal(t, "anthropic", gjson.GetBytes(out, "providerOptions.gateway.only.0").String())
 
 	// vendor-prefixed key variant
-	out = ApplyClinePassUpstreamPin(acct, []byte(`{"model":"other-model"}`))
+	out = ApplyClinePassUpstreamPinWithPlatform(newClinePassPinAccount(nil), acct, []byte(`{"model":"other-model"}`))
 	require.Empty(t, gjson.GetBytes(out, "providerOptions.gateway.only").Array())
 
 	// model without override falls back to top-level
-	out = ApplyClinePassUpstreamPin(acct, []byte(`{"model":"deepseek-v4.1-flash"}`))
+	out = ApplyClinePassUpstreamPinWithPlatform(newClinePassPinAccount(nil), acct, []byte(`{"model":"deepseek-v4.1-flash"}`))
 	require.Equal(t, "morph", gjson.GetBytes(out, "providerOptions.gateway.only.0").String())
 }
 
 func TestApplyClinePassUpstreamPinMergesExistingRouting(t *testing.T) {
-	acct := newClinePassPinAccount(pinExtra(t, map[string]any{
+	acct := pinConfig(t, map[string]any{
 		"mode": "strict", "upstream": "morph",
-	}))
+	})
 	body := []byte(`{"model":"m","providerOptions":{"gateway":{"someExisting":true},"other":1},"provider":{"order":["x"]}}`)
 
-	out := ApplyClinePassUpstreamPin(acct, body)
+	out := ApplyClinePassUpstreamPinWithPlatform(newClinePassPinAccount(nil), acct, body)
 
 	// existing keys preserved
 	require.True(t, gjson.GetBytes(out, "providerOptions.gateway.someExisting").Bool())
@@ -179,12 +171,13 @@ func TestApplyClinePassUpstreamPinMergesExistingRouting(t *testing.T) {
 	require.Equal(t, "morph", gjson.GetBytes(out, "provider.only.0").String())
 }
 
-func TestParseClinePassUpstreamPinFromJSONString(t *testing.T) {
+func TestParseClinePassUpstreamPinJSONRouting(t *testing.T) {
 	cfg := map[string]any{"mode": "strict", "upstream": "morph"}
 	raw, err := json.Marshal(cfg)
 	require.NoError(t, err)
 
-	acct := newClinePassPinAccount(map[string]any{ClinePassUpstreamPinExtraKey: string(raw)})
-	out := ApplyClinePassUpstreamPin(acct, []byte(`{"model":"m"}`))
+	acct, err := ParseClinePassUpstreamPinJSON(string(raw))
+	require.NoError(t, err)
+	out := ApplyClinePassUpstreamPinWithPlatform(newClinePassPinAccount(nil), acct, []byte(`{"model":"m"}`))
 	require.Equal(t, "morph", gjson.GetBytes(out, "providerOptions.gateway.only.0").String())
 }

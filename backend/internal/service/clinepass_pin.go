@@ -10,28 +10,8 @@ import (
 	"github.com/tidwall/sjson"
 )
 
-// ClinePassUpstreamPinExtraKey is the account.Extra JSONB key that carries the
-// upstream pin configuration for clinepass accounts. The value mirrors the
-// cline-pass-switcher injectPrefs semantics: it is injected into the outbound
-// Chat Completions body so the relay routes the request to a fixed upstream
-// provider (Vercel AI Gateway pipeline or the OpenRouter direct pipeline).
-//
-// Example value (account.Extra["clinepass_upstream_pin"]):
-//
-//	{
-//	  "mode": "strict",              // strict | preferred | off
-//	  "upstream": "morph",           // pinned provider slug
-//	  "order": ["morph", "..."],     // fallback order (preferred mode)
-//	  "only": ["morph"],             // explicit allow-list (overrides exclude)
-//	  "exclude": ["openai"],         // expanded to allow-list via "upstreams"
-//	  "upstreams": ["a","b","c"],    // known provider slugs (probe result)
-//	  "sort": "cost",                // cost | ttft | tps
-//	  "pipelines": "both",           // both | vercel | openrouter
-//	  "match_prefixes": ["deepseek"],// only pin models whose bare id starts so
-//	  "models": {                    // per-model overrides (bare or prefixed id)
-//	    "deepseek-v4-pro": { "upstream": "morph" }
-//	  }
-//	}
+// ClinePassUpstreamPinExtraKey identifies ignored legacy account configuration.
+// Platform settings are the sole source of upstream pinning.
 const ClinePassUpstreamPinExtraKey = "clinepass_upstream_pin"
 
 // ClinePassUpstreamPinConfig mirrors the pin configuration. Zero values mean
@@ -57,51 +37,6 @@ var clinePassSortAliases = map[string]string{
 	"cost": "price",
 	"ttft": "latency",
 	"tps":  "throughput",
-}
-
-// ParseClinePassUpstreamPin extracts the pin configuration from account.Extra.
-// It accepts both an object value (JSONB) and a JSON string. Returns nil when
-// no configuration is present or the configuration is unusable.
-func ParseClinePassUpstreamPin(extra map[string]any) *ClinePassUpstreamPinConfig {
-	if len(extra) == 0 {
-		return nil
-	}
-	raw, ok := extra[ClinePassUpstreamPinExtraKey]
-	if !ok || raw == nil {
-		return nil
-	}
-	cfg, err := decodeClinePassUpstreamPin(raw)
-	if err != nil || cfg == nil {
-		return nil
-	}
-	return cfg.normalize()
-}
-
-func decodeClinePassUpstreamPin(raw any) (*ClinePassUpstreamPinConfig, error) {
-	var data []byte
-	switch v := raw.(type) {
-	case string:
-		if strings.TrimSpace(v) == "" {
-			return nil, nil
-		}
-		data = []byte(v)
-	case []byte:
-		if len(v) == 0 {
-			return nil, nil
-		}
-		data = v
-	default:
-		b, err := json.Marshal(v)
-		if err != nil {
-			return nil, fmt.Errorf("clinepass pin: marshal config: %w", err)
-		}
-		data = b
-	}
-	var cfg ClinePassUpstreamPinConfig
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("clinepass pin: invalid config: %w", err)
-	}
-	return &cfg, nil
 }
 
 func (c *ClinePassUpstreamPinConfig) normalize() *ClinePassUpstreamPinConfig {
@@ -173,74 +108,6 @@ func (c *ClinePassUpstreamPinConfig) MatchesModel(model string) bool {
 		}
 	}
 	return false
-}
-
-// ClinePassUpstreamPinDisabled reports whether the account explicitly turns the
-// pin off ("mode":"off"). Such accounts keep the pre-platform-level behaviour
-// even when a platform-level pin is configured.
-func ClinePassUpstreamPinDisabled(extra map[string]any) bool {
-	if len(extra) == 0 {
-		return false
-	}
-	raw, ok := extra[ClinePassUpstreamPinExtraKey]
-	if !ok || raw == nil {
-		return false
-	}
-	cfg, err := decodeClinePassUpstreamPin(raw)
-	if err != nil || cfg == nil {
-		return false
-	}
-	return strings.EqualFold(strings.TrimSpace(cfg.Mode), "off")
-}
-
-// MergeClinePassUpstreamPin layers an account-level pin over the platform-level
-// default: non-zero account fields win, platform fields fill the gaps.
-func MergeClinePassUpstreamPin(platform, account *ClinePassUpstreamPinConfig) *ClinePassUpstreamPinConfig {
-	if platform == nil {
-		return account
-	}
-	if account == nil {
-		return platform
-	}
-	merged := *platform
-	if account.Mode != "" {
-		merged.Mode = account.Mode
-	}
-	if account.Upstream != "" {
-		merged.Upstream = account.Upstream
-	}
-	if len(account.Order) > 0 {
-		merged.Order = account.Order
-	}
-	if len(account.Only) > 0 {
-		merged.Only = account.Only
-	}
-	if len(account.Exclude) > 0 {
-		merged.Exclude = account.Exclude
-	}
-	if len(account.Upstreams) > 0 {
-		merged.Upstreams = account.Upstreams
-	}
-	if account.Sort != "" {
-		merged.Sort = account.Sort
-	}
-	if account.Pipelines != "" {
-		merged.Pipelines = account.Pipelines
-	}
-	if len(account.MatchPrefixes) > 0 {
-		merged.MatchPrefixes = account.MatchPrefixes
-	}
-	if len(account.Models) > 0 {
-		models := make(map[string]ClinePassUpstreamPinConfig, len(platform.Models)+len(account.Models))
-		for key, value := range platform.Models {
-			models[key] = value
-		}
-		for key, value := range account.Models {
-			models[key] = value
-		}
-		merged.Models = models
-	}
-	return &merged
 }
 
 // ParseClinePassUpstreamPinJSON decodes a platform-level pin configuration
@@ -346,25 +213,14 @@ func (c *ClinePassUpstreamPinConfig) effectiveForModel(model string) *ClinePassU
 	return &eff
 }
 
-// ApplyClinePassUpstreamPin injects the account's pin configuration into the
-// outbound body. It is fail-open: when no configuration exists, or injection
-// fails, the original body is returned unchanged.
-func ApplyClinePassUpstreamPin(account *Account, body []byte) []byte {
-	return ApplyClinePassUpstreamPinWithPlatform(account, nil, body)
-}
-
-// ApplyClinePassUpstreamPinWithPlatform injects the effective pin configuration
-// (account-level overriding the platform-level default) into the outbound body.
-// It is fail-open: when no configuration exists, or injection fails, the
-// original body is returned unchanged.
+// ApplyClinePassUpstreamPinWithPlatform injects only platform routing settings
+// for ClinePass accounts. Legacy account pins, including mode=off, are ignored.
 func ApplyClinePassUpstreamPinWithPlatform(account *Account, platform *ClinePassUpstreamPinConfig, body []byte) []byte {
-	if account == nil || len(body) == 0 {
+	if account == nil || !account.IsClinePass() || platform == nil || len(body) == 0 {
 		return body
 	}
-	if ClinePassUpstreamPinDisabled(account.Extra) {
-		return body
-	}
-	cfg := MergeClinePassUpstreamPin(platform, ParseClinePassUpstreamPin(account.Extra))
+	local := *platform
+	cfg := local.normalize()
 	if cfg == nil {
 		return body
 	}
@@ -386,8 +242,8 @@ func applyClinePassUpstreamPinToBody(body []byte, cfg *ClinePassUpstreamPinConfi
 		return body, nil
 	}
 
-	useVercel := eff.Pipelines == "" || eff.Pipelines == "vercel"
-	useOpenRouter := eff.Pipelines == "" || eff.Pipelines == "openrouter"
+	useVercel := eff.Pipelines == "" || eff.Pipelines == "both" || eff.Pipelines == "vercel"
+	useOpenRouter := eff.Pipelines == "" || eff.Pipelines == "both" || eff.Pipelines == "openrouter"
 	if !useVercel && !useOpenRouter {
 		return body, nil
 	}

@@ -262,7 +262,7 @@ export default {
         modelUpstreamPlaceholder: '上游标识',
         modelsRemove: '删除',
         lastKnownTitle: '最近实际命中的上游',
-        lastKnownDesc: '该 ClinePass 账号各模型最近一次真实命中的上游，并与上方钉住配置的期望值对照。',
+        lastKnownDesc: '该 ClinePass 账号各模型最近一次真实命中的上游，并与当前平台钉定规则的期望值对照。',
         lastKnownRefresh: '刷新',
         lastKnownLoading: '加载中...',
         lastKnownEmpty: '暂无记录（该账号还未有成功的 ClinePass 请求）。',

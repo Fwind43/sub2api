@@ -416,7 +416,7 @@ export default {
         modelUpstreamPlaceholder: 'Upstream slug',
         modelsRemove: 'Remove',
         lastKnownTitle: 'Last actually-hit upstream',
-        lastKnownDesc: 'The upstream that most recently actually served each model on this ClinePass account, compared against the pin expectation above.',
+        lastKnownDesc: 'The upstream that most recently actually served each model on this ClinePass account, compared against the current platform pin rules.',
         lastKnownRefresh: 'Refresh',
         lastKnownLoading: 'Loading...',
         lastKnownEmpty: 'No records yet (this account has no successful ClinePass request yet).',

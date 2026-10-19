@@ -6,7 +6,7 @@
       </h2>
       <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
         对所有 ClinePass 账号生效：命中模型前缀的请求会被固定路由到指定上游渠道（例如 deepseek）。
-        单个账号的 extra.clinepass_upstream_pin 可覆盖此处配置；账号级 mode=off 可让该账号退出平台级钉定。
+        平台配置是唯一生效来源；历史账号级配置（包括关闭）不再覆盖此设置。
       </p>
     </div>
     <div class="space-y-4 p-6">
