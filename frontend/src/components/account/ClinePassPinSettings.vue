@@ -91,7 +91,7 @@ const expectedProviders = (model: string): string[] => {
     Array.isArray(value) ? value.length > 0 : typeof value === 'string' && value !== ''
   )) } as ClinePassUpstreamPinConfig
   if (config.mode === 'off') return []
-  const prefixes = config.match_prefixes?.map(p => p.trim().toLowerCase()).filter(Boolean) || []
+  const prefixes = (override ? [] : config.match_prefixes)?.map(p => p.trim().toLowerCase()).filter(Boolean) || []
   if (prefixes.length && !prefixes.some(prefix => base.startsWith(prefix))) return []
   const upstream = config.upstream?.trim()
   // Strict upstream wins over an explicit list, matching outbound injection.

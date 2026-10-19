@@ -61,6 +61,51 @@ func validateClinePassUpstreamPin(cfg *ClinePassUpstreamPinConfig) error {
 	if cfg == nil {
 		return nil
 	}
+	if err := validateClinePassPinEnums(cfg); err != nil {
+		return err
+	}
+	if strings.EqualFold(strings.TrimSpace(cfg.Mode), "off") {
+		return nil
+	}
+	seen := make(map[string]bool, len(cfg.Models))
+	activeModels := 0
+	for model, rule := range cfg.Models {
+		key := strings.TrimSpace(model)
+		base := clinePassStripModelPrefix(key)
+		if key == "" || base == "" || seen[base] {
+			return infraerrors.BadRequest("CLINEPASS_PIN_INVALID_MODEL", "model IDs must be non-empty and unique (including bare/prefixed aliases)")
+		}
+		seen[base] = true
+		if len(rule.Models) > 0 {
+			return infraerrors.BadRequest("CLINEPASS_PIN_INVALID_MODEL", "nested model rules are not supported")
+		}
+		if err := validateClinePassPinEnums(&rule); err != nil {
+			return err
+		}
+		effective := cfg.effectiveForModel(key)
+		if strings.EqualFold(strings.TrimSpace(effective.Mode), "off") {
+			continue
+		}
+		if !effective.MatchesModel(key) {
+			return infraerrors.BadRequest("CLINEPASS_PIN_INVALID_MODEL", "free/relay-managed models cannot be pinned")
+		}
+		if !clinePassPinHasRoute(effective) {
+			return infraerrors.BadRequest("CLINEPASS_PIN_UPSTREAM_REQUIRED", "each active model must specify or inherit an upstream route")
+		}
+		activeModels++
+	}
+	if !clinePassPinHasRoute(cfg) && activeModels == 0 {
+		return infraerrors.BadRequest("CLINEPASS_PIN_UPSTREAM_REQUIRED", "an upstream route or at least one active model rule is required")
+	}
+	return nil
+}
+
+func clinePassPinHasRoute(cfg *ClinePassUpstreamPinConfig) bool {
+	return strings.TrimSpace(cfg.Upstream) != "" || len(clinePassPinDedupe(cfg.Only)) > 0 ||
+		(len(clinePassPinDedupe(cfg.Exclude)) > 0 && len(clinePassPinDedupe(cfg.Upstreams)) > 0)
+}
+
+func validateClinePassPinEnums(cfg *ClinePassUpstreamPinConfig) error {
 	switch strings.ToLower(strings.TrimSpace(cfg.Mode)) {
 	case "", "strict", "preferred", "off":
 	default:
@@ -70,12 +115,6 @@ func validateClinePassUpstreamPin(cfg *ClinePassUpstreamPinConfig) error {
 	case "", "both", "vercel", "openrouter":
 	default:
 		return infraerrors.BadRequest("CLINEPASS_PIN_INVALID_PIPELINES", "pipelines must be one of both, vercel, openrouter")
-	}
-	if strings.EqualFold(strings.TrimSpace(cfg.Mode), "off") {
-		return nil
-	}
-	if strings.TrimSpace(cfg.Upstream) == "" && len(cfg.Only) == 0 && len(cfg.Exclude) == 0 {
-		return infraerrors.BadRequest("CLINEPASS_PIN_UPSTREAM_REQUIRED", "upstream is required unless mode is off")
 	}
 	return nil
 }

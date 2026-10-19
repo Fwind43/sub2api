@@ -186,11 +186,13 @@ func (c *ClinePassUpstreamPinConfig) effectiveForModel(model string) *ClinePassU
 	if override == nil {
 		return &eff
 	}
+	// An explicit model rule is independent of the default prefix gate.
+	eff.MatchPrefixes = nil
 	if override.Mode != "" {
-		eff.Mode = override.Mode
+		eff.Mode = strings.ToLower(strings.TrimSpace(override.Mode))
 	}
 	if override.Upstream != "" {
-		eff.Upstream = override.Upstream
+		eff.Upstream = strings.TrimSpace(override.Upstream)
 	}
 	if len(override.Order) > 0 {
 		eff.Order = override.Order
@@ -208,7 +210,7 @@ func (c *ClinePassUpstreamPinConfig) effectiveForModel(model string) *ClinePassU
 		eff.Sort = override.Sort
 	}
 	if override.Pipelines != "" {
-		eff.Pipelines = override.Pipelines
+		eff.Pipelines = strings.ToLower(strings.TrimSpace(override.Pipelines))
 	}
 	return &eff
 }

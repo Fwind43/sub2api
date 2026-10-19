@@ -75,6 +75,19 @@ describe('ClinePass platform-only routing diagnostics', () => {
     expect(wrapper.find('[data-testid="clinepass-lastknown-verdict"]').exists()).toBe(false)
   })
 
+  it('compares an explicit model rule outside the default prefix gate', async () => {
+    vi.mocked(getUpstreamPin).mockResolvedValue({ config: {
+      mode: 'strict', upstream: 'deepseek', match_prefixes: ['deepseek'],
+      models: { 'cline-pass/glm-5.3': { upstream: 'z-ai' } }
+    } })
+    vi.mocked(listLastKnown).mockResolvedValue({
+      account_id: 1, items: [{ ...observation, model: 'glm-5.3', provider: 'z-ai' }]
+    })
+    const wrapper = mountStatus()
+    await flushPromises()
+    expect(wrapper.get('[data-testid="clinepass-lastknown-verdict"]').text()).toBe(verdict + 'Match')
+  })
+
   it('uses platform per-model overrides and explicit allow lists', async () => {
     vi.mocked(getUpstreamPin).mockResolvedValue({ config: {
       mode: 'preferred', upstream: 'morph', models: { 'deepseek-v4-pro': { only: ['morph', 'deepseek'] } }
