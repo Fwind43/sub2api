@@ -196,6 +196,23 @@ function buildOpenAISparkShadowAccount() {
   } as any
 }
 
+function buildClinePassOAuthAccount() {
+  return {
+    ...buildAccount(),
+    id: 8,
+    name: 'ClinePass OAuth',
+    platform: 'clinepass',
+    type: 'oauth',
+    credentials: {
+      email: 'user@example.com',
+      token_type: 'Bearer',
+      model_mapping: {
+        'deepseek-v4.1-flash': 'deepseek-v4.1-flash-1017'
+      }
+    }
+  } as any
+}
+
 function buildVertexAccount() {
   return {
     id: 2,
@@ -352,6 +369,23 @@ describe('EditAccountModal', () => {
     expect(wrapper.getComponent(ModelWhitelistSelectorStub).props('modelMappings')).toEqual([
       { from: 'gpt-latest', to: 'deepseek-chat' }
     ])
+  })
+
+  it('shows and preserves clinepass OAuth model restriction mappings', async () => {
+    const account = buildClinePassOAuthAccount()
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+
+    const fromInput = wrapper.get<HTMLInputElement>('input[placeholder="admin.accounts.requestModel"]')
+    const toInput = wrapper.get<HTMLInputElement>('input[placeholder="admin.accounts.actualModel"]')
+    expect(fromInput.element.value).toBe('deepseek-v4.1-flash')
+    expect(toInput.element.value).toBe('deepseek-v4.1-flash-1017')
+
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.model_mapping).toEqual({
+      'deepseek-v4.1-flash': 'deepseek-v4.1-flash-1017'
+    })
   })
 
   it('sets expiry presets from now instead of extending the saved expiry', async () => {
