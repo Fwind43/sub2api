@@ -6,6 +6,7 @@ import (
 	"database/sql/driver"
 	"fmt"
 	"reflect"
+	"regexp"
 	"testing"
 	"time"
 
@@ -717,6 +718,31 @@ func TestUsageLogRepositoryGetModelStatsAccountCostColumn(t *testing.T) {
 	require.Equal(t, 1.8, results[0].AccountCost)
 	require.Equal(t, "claude-sonnet-4-6", results[1].Model)
 	require.Equal(t, 0.7, results[1].AccountCost)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestUsageLogRepositoryGetModelStatsWithAccountFilterKeepsUserActualCost(t *testing.T) {
+	db, mock := newSQLMock(t)
+	repo := &usageLogRepository{sql: db}
+
+	start := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	end := start.Add(24 * time.Hour)
+
+	actualExpr := regexp.QuoteMeta("COALESCE(SUM(actual_cost), 0) as actual_cost")
+	accountCostExpr := regexp.QuoteMeta("COALESCE(SUM(COALESCE(account_stats_cost, total_cost) * COALESCE(account_rate_multiplier, 1)), 0) as account_cost")
+	mock.ExpectQuery("(?s)SELECT.*"+actualExpr+".*"+accountCostExpr+".*FROM usage_logs.*WHERE created_at >= \\$1 AND created_at < \\$2 AND account_id = \\$3.*GROUP BY").
+		WithArgs(start, end, int64(42)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"model", "requests", "input_tokens", "output_tokens",
+			"cache_creation_tokens", "cache_read_tokens", "total_tokens",
+			"cost", "actual_cost", "account_cost",
+		}).AddRow("deepseek-v4.1-flash", int64(3), int64(10), int64(20), int64(0), int64(0), int64(30), 0.30, 0.09, 0.30))
+
+	results, err := repo.GetModelStatsWithFilters(context.Background(), start, end, 0, 0, 42, 0, nil, nil, nil)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	require.Equal(t, 0.09, results[0].ActualCost)
+	require.Equal(t, 0.30, results[0].AccountCost)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
