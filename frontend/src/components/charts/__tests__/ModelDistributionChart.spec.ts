@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 
 import ModelDistributionChart from '../ModelDistributionChart.vue'
+import { getUserBreakdown } from '@/api/admin/dashboard'
+
+vi.mock('@/api/admin/dashboard', () => ({
+  getUserBreakdown: vi.fn().mockResolvedValue({ users: [] }),
+}))
 
 const messages: Record<string, string> = {
   'admin.dashboard.modelDistribution': 'Model Distribution',
@@ -197,5 +202,31 @@ describe('ModelDistributionChart', () => {
     expect(rows[3].text()).toContain('4')
     expect(rows[3].text()).toContain('400')
     expect(rows[3].text()).toContain('$10.00')
+  })
+
+  it('scopes the user breakdown to the account rolling window', async () => {
+    const wrapper = mount(ModelDistributionChart, {
+      props: {
+        modelStats,
+        filters: { account_id: 1751 },
+        days: 30,
+      },
+      global: {
+        stubs: {
+          LoadingSpinner: true,
+        },
+      },
+    })
+
+    await wrapper.findAll('tbody tr')[0].trigger('click')
+    await flushPromises()
+
+    expect(getUserBreakdown).toHaveBeenCalledWith(
+      expect.objectContaining({
+        account_id: 1751,
+        days: 30,
+        model: 'model-a',
+      })
+    )
   })
 })

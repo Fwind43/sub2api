@@ -167,6 +167,8 @@ export async function getGroupStats(params?: GroupStatsParams): Promise<GroupSta
 export interface UserBreakdownParams {
   start_date?: string
   end_date?: string
+  // Rolling window in days, same semantics as account stats (?days=30).
+  days?: number
   group_id?: number
   model?: string
   model_source?: 'requested' | 'upstream' | 'mapping'

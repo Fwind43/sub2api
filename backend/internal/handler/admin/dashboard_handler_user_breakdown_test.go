@@ -18,15 +18,19 @@ import (
 
 type userBreakdownRepoCapture struct {
 	service.UsageLogRepository
+	capturedStart time.Time
+	capturedEnd   time.Time
 	capturedDim   usagestats.UserBreakdownDimension
 	capturedLimit int
 	result        []usagestats.UserBreakdownItem
 }
 
 func (r *userBreakdownRepoCapture) GetUserBreakdownStats(
-	_ context.Context, _, _ time.Time,
+	_ context.Context, start, end time.Time,
 	dim usagestats.UserBreakdownDimension, limit int,
 ) ([]usagestats.UserBreakdownItem, error) {
+	r.capturedStart = start
+	r.capturedEnd = end
 	r.capturedDim = dim
 	r.capturedLimit = limit
 	if r.result != nil {
@@ -279,4 +283,21 @@ func TestGetUserBreakdown_InvalidRequestType(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestGetUserBreakdown_DaysAndAccountFilter(t *testing.T) {
+	repo := &userBreakdownRepoCapture{}
+	router := newUserBreakdownRouter(repo)
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/admin/dashboard/user-breakdown?days=30&account_id=1751&model=deepseek-v4.1-flash", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, int64(1751), repo.capturedDim.AccountID)
+	require.Equal(t, "deepseek-v4.1-flash", repo.capturedDim.Model)
+	span := repo.capturedEnd.Sub(repo.capturedStart)
+	require.GreaterOrEqual(t, span, 29*24*time.Hour)
+	require.LessOrEqual(t, span, 31*24*time.Hour)
 }

@@ -64,6 +64,19 @@ func parseTimeRange(c *gin.Context) (time.Time, time.Time) {
 	return startTime, endTime
 }
 
+// parseTimeRangeOrDays mirrors account stats' rolling day window when days is
+// provided, so per-user breakdowns opened from an account stats modal cover the
+// same period as the parent rows.
+func parseTimeRangeOrDays(c *gin.Context) (time.Time, time.Time) {
+	if v := c.Query("days"); v != "" {
+		if days, err := strconv.Atoi(v); err == nil && days > 0 && days <= 90 {
+			now := timezone.Now()
+			return timezone.StartOfDay(now.AddDate(0, 0, -days+1)), timezone.StartOfDay(now.AddDate(0, 0, 1))
+		}
+	}
+	return parseTimeRange(c)
+}
+
 func parseOptionalBoolDashboardFilter(c *gin.Context, name string) (*bool, error) {
 	raw := strings.TrimSpace(c.Query(name))
 	if raw == "" {
@@ -672,7 +685,7 @@ func (h *DashboardHandler) GetBatchAPIKeysUsage(c *gin.Context) {
 // GET /api/v1/admin/dashboard/user-breakdown
 // Query params: start_date, end_date, group_id, model, endpoint, endpoint_type, limit
 func (h *DashboardHandler) GetUserBreakdown(c *gin.Context) {
-	startTime, endTime := parseTimeRange(c)
+	startTime, endTime := parseTimeRangeOrDays(c)
 
 	dim := usagestats.UserBreakdownDimension{}
 	if v := c.Query("group_id"); v != "" {

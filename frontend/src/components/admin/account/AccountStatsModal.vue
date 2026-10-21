@@ -409,7 +409,12 @@
         </div>
 
         <!-- Model Distribution -->
-        <ModelDistributionChart :model-stats="stats.models" :loading="false" />
+        <ModelDistributionChart
+          :model-stats="stats.models"
+          :loading="false"
+          :filters="{ account_id: account?.id }"
+          :days="30"
+        />
 
         <EndpointDistributionChart
           :endpoint-stats="stats.endpoints || []"

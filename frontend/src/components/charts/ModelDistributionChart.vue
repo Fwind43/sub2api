@@ -279,6 +279,8 @@ const props = withDefaults(defineProps<{
   rankingError?: boolean
   startDate?: string
   endDate?: string
+  // Rolling window that matches account stats when used inside account modals.
+  days?: number
   filters?: Record<string, any>
 }>(), {
   upstreamModelStats: () => [],
@@ -317,6 +319,7 @@ const toggleBreakdown = async (type: string, id: string) => {
       ...props.filters,
       start_date: props.startDate,
       end_date: props.endDate,
+      days: props.days,
       model: id,
       model_source: props.source,
     })
