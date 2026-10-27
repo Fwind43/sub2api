@@ -21,6 +21,7 @@ type ClinePassUpstreamPinConfig struct {
 	Upstream  string   `json:"upstream"`
 	Order     []string `json:"order"`
 	Only      []string `json:"only"`
+	Has       []string `json:"has,omitempty"`
 	Exclude   []string `json:"exclude"`
 	Upstreams []string `json:"upstreams"`
 	Sort      string   `json:"sort"`
@@ -49,6 +50,7 @@ func (c *ClinePassUpstreamPinConfig) normalize() *ClinePassUpstreamPinConfig {
 	c.Pipelines = strings.ToLower(strings.TrimSpace(c.Pipelines))
 	c.Order = clinePassPinDedupe(c.Order)
 	c.Only = clinePassPinDedupe(c.Only)
+	c.Has = clinePassPinDedupe(c.Has)
 	c.Exclude = clinePassPinDedupe(c.Exclude)
 	c.Upstreams = clinePassPinDedupe(c.Upstreams)
 	c.MatchPrefixes = clinePassPinDedupeLower(c.MatchPrefixes)
@@ -193,6 +195,9 @@ func (c *ClinePassUpstreamPinConfig) effectiveForModel(model string) *ClinePassU
 	if len(override.Only) > 0 {
 		eff.Only = override.Only
 	}
+	if override.Has != nil {
+		eff.Has = override.Has
+	}
 	if len(override.Exclude) > 0 {
 		eff.Exclude = override.Exclude
 	}
@@ -298,6 +303,12 @@ func applyClinePassUpstreamPinToBody(body []byte, cfg *ClinePassUpstreamPinConfi
 		updated, err = applyClinePassRoutingIntent(updated, "providerOptions.gateway", intent.only, intent.order, intent.sort)
 		if err != nil {
 			return body, err
+		}
+		if len(eff.Has) > 0 {
+			updated, err = sjson.SetBytes(updated, "providerOptions.gateway.has", eff.Has)
+			if err != nil {
+				return body, fmt.Errorf("clinepass pin: set providerOptions.gateway.has: %w", err)
+			}
 		}
 	}
 	if useOpenRouter {

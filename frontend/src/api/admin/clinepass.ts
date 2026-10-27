@@ -190,6 +190,7 @@ export interface ClinePassUpstreamPinConfig {
   upstreams?: string[]
   order?: string[]
   only?: string[]
+  has?: string[]
   exclude?: string[]
   sort?: string
   pipelines?: '' | 'both' | 'vercel' | 'openrouter'

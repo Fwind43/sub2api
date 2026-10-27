@@ -48,6 +48,30 @@ func TestClinePassPlatformMultiModelPins(t *testing.T) {
 	require.Equal(t, raw, after, "validation and injection must not mutate shared model rules")
 }
 
+func TestClinePassModelGatewayCapabilities(t *testing.T) {
+	cfg := &ClinePassUpstreamPinConfig{
+		Mode: "strict", Upstream: "deepseek", MatchPrefixes: []string{"deepseek"},
+		Models: map[string]ClinePassUpstreamPinConfig{
+			"deepseek-v4.1-flash-1017": {Upstream: "deepseek", Pipelines: "both", Has: []string{"reasoning"}},
+			"mimo-v2.6-pro":            {Upstream: "xiaomi", Pipelines: "both"},
+		},
+	}
+	require.NoError(t, validateClinePassUpstreamPin(cfg))
+	raw, err := json.Marshal(cfg)
+	require.NoError(t, err)
+	loaded, err := ParseClinePassUpstreamPinJSON(string(raw))
+	require.NoError(t, err)
+	body := []byte(`{"model":"cline-pass/deepseek-v4.1-flash-1017"}`)
+	out := ApplyClinePassUpstreamPinWithPlatform(newClinePassPinAccount(nil), loaded, body)
+	require.Equal(t, `["deepseek"]`, gjson.GetBytes(out, "providerOptions.gateway.only").Raw)
+	require.Equal(t, `["reasoning"]`, gjson.GetBytes(out, "providerOptions.gateway.has").Raw)
+	require.False(t, gjson.GetBytes(out, "provider.has").Exists())
+	require.Equal(t, out, ApplyClinePassUpstreamPinWithPlatform(newClinePassPinAccount(nil), loaded, out))
+	other := ApplyClinePassUpstreamPinWithPlatform(newClinePassPinAccount(nil), loaded, []byte(`{"model":"mimo-v2.6-pro"}`))
+	require.Equal(t, "xiaomi", gjson.GetBytes(other, "providerOptions.gateway.only.0").String())
+	require.False(t, gjson.GetBytes(other, "providerOptions.gateway.has").Exists())
+}
+
 func TestClinePassModelRuleBypassesOnlyDefaultPrefix(t *testing.T) {
 	cfg := deepSeekPlatformPin()
 	cfg.Models = map[string]ClinePassUpstreamPinConfig{"glm-5.3": {Upstream: "z-ai"}, "deepseek-disabled": {Mode: "off"}}

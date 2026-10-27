@@ -93,6 +93,10 @@
               <input v-model="row.probeInput" class="input w-full" placeholder="填写该前缀下的具体模型，例如 deepseek-v4.1-flash" data-testid="pin-model-probe-id" @input="clearProbe(row)" />
               <span class="mt-1 block text-xs text-gray-500">探测结果仅代表此具体模型，其他同前缀模型的可用渠道可能不同。</span>
             </label>
+            <label class="block text-sm">
+              <span class="input-label">Gateway 能力过滤（逗号分隔）</span>
+              <input v-model="row.hasText" class="input w-full" placeholder="例如 reasoning" data-testid="pin-model-has" />
+            </label>
             <div class="flex flex-wrap items-center gap-2">
               <button type="button" class="btn btn-secondary btn-sm" :disabled="!probeAccountId || !row.model.trim() || probing" data-testid="pin-model-probe" @click="probeOne(row)">探测渠道</button>
               <button type="button" class="btn btn-secondary btn-sm" data-testid="pin-model-remove" @click="removeRow(row)">移除规则</button>
@@ -140,6 +144,7 @@ interface ModelRow {
   key: number
   model: string
   upstream: string
+  hasText: string
   mode: PinMode | ''
   pipelines: Pipelines | ''
   original: ClinePassUpstreamPinConfig
@@ -186,7 +191,7 @@ const modelPatternError = (model: string): string => {
 
 function makeRow(model = '', config: ClinePassUpstreamPinConfig = { mode: 'strict', pipelines: 'both' }): ModelRow {
   return {
-    key: ++nextKey, model, upstream: config.upstream || '', mode: config.mode || '',
+    key: ++nextKey, model, upstream: config.upstream || '', hasText: (config.has || []).join(', '), mode: config.mode || '',
     pipelines: config.pipelines || '', original: config, probing: false, probeVersion: 0,
     probeModel: '', probeInput: '', probeError: '', result: null
   }
@@ -324,7 +329,7 @@ function buildPayload(): ClinePassUpstreamPinConfig {
     if (seen.has(canonical)) throw new Error(`模型重复：${model}（裸名称与 cline-pass/ 名称视为同一模型）`)
     seen.add(canonical)
     if (row.mode !== 'off' && model.toLowerCase().startsWith('cline-free')) throw new Error('cline-free 模型不支持钉定。')
-    models[model] = { ...row.original, mode: row.mode || undefined, upstream: row.upstream.trim(), pipelines: row.pipelines || undefined }
+    models[model] = { ...row.original, mode: row.mode || undefined, upstream: row.upstream.trim(), has: row.hasText.split(/[,，]/).map(value => value.trim()).filter(Boolean), pipelines: row.pipelines || undefined }
   }
   return {
     ...original.value, mode: mode.value, upstream: upstream.value.trim(),
@@ -354,7 +359,7 @@ async function save() {
     saving.value = false
   }
 }
-watch([mode, upstream, matchPrefixesText, () => rows.value.map(row => [row.model, row.upstream, row.mode, row.pipelines])], () => { savedMsg.value = '' }, { flush: 'sync', deep: true })
+watch([mode, upstream, matchPrefixesText, () => rows.value.map(row => [row.model, row.upstream, row.hasText, row.mode, row.pipelines])], () => { savedMsg.value = '' }, { flush: 'sync', deep: true })
 watch(probeAccountId, () => { rows.value.forEach(clearProbe) })
 onMounted(() => { void load(); void loadAccounts() })
 onBeforeUnmount(() => { alive = false; accountLoadVersion++ })
