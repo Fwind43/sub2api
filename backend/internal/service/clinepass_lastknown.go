@@ -87,6 +87,9 @@ func ParseClinePassRouting(payload []byte) *ClinePassRouting {
 	msg := d.Get("choices.0.message")
 	rt := msg.Get("provider_metadata.gateway.routing")
 	if !rt.Exists() {
+		rt = d.Get("choices.0.delta.provider_metadata.gateway.routing")
+	}
+	if !rt.Exists() {
 		rt = d.Get("provider_metadata.gateway.routing")
 	}
 
@@ -99,9 +102,6 @@ func ParseClinePassRouting(payload []byte) *ClinePassRouting {
 	model := strings.TrimSpace(d.Get("model").String())
 
 	canonical := strings.TrimSpace(rt.Get("canonicalSlug").String())
-	if canonical == "" && strings.Contains(model, "/") {
-		canonical = model
-	}
 
 	pipeline := ""
 	switch {

@@ -235,6 +235,7 @@ func (s *OpenAIGatewayService) aggregateClinePassStreamBody(
 	scanner := s.newUpstreamSSEScanner(resp.Body)
 	accumulator := newClinePassStreamAccumulator()
 	var firstTokenMs *int
+	var lastRouting *ClinePassRouting
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -245,6 +246,9 @@ func (s *OpenAIGatewayService) aggregateClinePassStreamBody(
 		payload = strings.TrimSpace(payload)
 		if payload == "[DONE]" {
 			continue
+		}
+		if routing := ParseClinePassRouting([]byte(payload)); routing != nil {
+			lastRouting = routing
 		}
 		observer.ObserveOpenAI([]byte(payload), strings.TrimSpace(gjson.Get(payload, "type").String()))
 		if firstTokenMs == nil && !isOpenAIChatUsageOnlyStreamChunk(payload) {
@@ -267,8 +271,8 @@ func (s *OpenAIGatewayService) aggregateClinePassStreamBody(
 	}
 
 	body := accumulator.build(upstreamModel, originalModel)
-	if routing := ParseClinePassRouting(body); routing != nil {
-		s.RecordClinePassRouting(c.Request.Context(), account.ID, originalModel, routing)
+	if lastRouting != nil {
+		s.RecordClinePassRouting(c.Request.Context(), account.ID, originalModel, lastRouting)
 	}
 	return body, accumulator.usage, firstTokenMs, nil
 }

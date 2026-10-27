@@ -142,7 +142,7 @@ func (s *OpenAIGatewayService) forwardAnthropicViaRawChatCompletions(
 
 	// 5. Convert response
 	if clientStream {
-		return s.streamChatCompletionsAsAnthropic(c, resp, originalModel, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
+		return s.streamChatCompletionsAsAnthropic(c, resp, account, originalModel, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
 	}
 	if account.Platform == PlatformClinePass {
 		// ClinePass 只实现流式生成：上游永远回 SSE，客户端要非流式时必须先把
@@ -192,6 +192,7 @@ func (s *OpenAIGatewayService) bufferChatCompletionsAsAnthropic(
 func (s *OpenAIGatewayService) streamChatCompletionsAsAnthropic(
 	c *gin.Context,
 	resp *http.Response,
+	account *Account,
 	originalModel string,
 	billingModel string,
 	upstreamModel string,
@@ -229,7 +230,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsAnthropic(
 		}
 	}
 
-	scan := s.scanCCStream(c, resp, "openai messages chat fallback", requestID, startTime, emitChunk)
+	scan := s.scanCCStream(c, resp, "openai messages chat fallback", requestID, startTime, account, originalModel, emitChunk)
 	usage := scan.Usage
 
 	if scan.Err != nil {

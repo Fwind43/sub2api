@@ -1,7 +1,7 @@
 <template>
   <div class="space-y-4 border-t border-gray-200 pt-4 dark:border-dark-600" data-testid="clinepass-routing-status">
     <p class="text-xs text-gray-500 dark:text-gray-400" data-testid="clinepass-platform-only">
-      ClinePass 上游钉定统一以平台设置为准，账号级配置已移除。下方仅展示实际命中与平台规则的对照。
+      ClinePass 上游钉定统一以平台设置为准，账号级配置已移除。
     </p>
     <div class="rounded-lg border border-gray-200 p-3 dark:border-dark-600" data-testid="clinepass-lastknown">
       <div class="flex items-center justify-between gap-4">
@@ -49,13 +49,7 @@
             {{ t('admin.accounts.clinepassPin.lastKnownExpected') }}:
             {{ expectedForModel(item.model) || t('admin.accounts.clinepassPin.lastKnownNone') }}
           </span>
-          <span
-            v-if="expectedForModel(item.model)"
-            :class="isMatch(item) ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'"
-            data-testid="clinepass-lastknown-verdict"
-          >
-            {{ isMatch(item) ? t('admin.accounts.clinepassPin.lastKnownMatch') : t('admin.accounts.clinepassPin.lastKnownMismatch') }}
-          </span>
+
         </div>
         <p v-if="item.fallbacks?.length" class="mt-1 text-gray-400">{{ item.fallbacks.join(', ') }}</p>
       </div>
@@ -110,8 +104,6 @@ const expectedProviders = (model: string): string[] => {
   return upstream ? [upstream] : []
 }
 const expectedForModel = (model: string): string => expectedProviders(model).join(', ')
-const isMatch = (item: ClinePassLastKnownItem): boolean =>
-  expectedProviders(item.model).some(provider => provider.toLowerCase() === item.provider.trim().toLowerCase())
 const pipelineLabel = (value: string): string =>
   value === 'planner' ? t('admin.accounts.clinepassPin.lastKnownPipelinePlanner')
     : value === 'direct' ? t('admin.accounts.clinepassPin.lastKnownPipelineDirect') : value

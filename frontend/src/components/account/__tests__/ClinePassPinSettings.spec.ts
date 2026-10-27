@@ -25,14 +25,14 @@ const verdict = 'admin.accounts.clinepassPin.lastKnown'
 
 describe('ClinePass platform-only routing diagnostics', () => {
   it.each([
-    ['deepseek-v3', 'deepseek', true],
-    ['cline-pass/deepseek-v4-pro', 'novita', true],
-    ['deepseek-v4.1-flash', 'exact', true],
-    ['deepseek-v4.1-flash', 'novita', false],
-    ['cline-pass/glm-5.3-flash', 'z-ai', true],
-    ['glm-disabled-test', 'z-ai', null],
-    ['cline-free/glm-5.3-flash', 'z-ai', null]
-  ])('uses the same prefix priority for %s / %s', async (model, provider, matched) => {
+    ['deepseek-v3', 'deepseek', 'deepseek'],
+    ['cline-pass/deepseek-v4-pro', 'novita', 'novita'],
+    ['deepseek-v4.1-flash', 'exact', 'exact'],
+    ['deepseek-v4.1-flash', 'novita', 'exact'],
+    ['cline-pass/glm-5.3-flash', 'z-ai', 'z-ai'],
+    ['glm-disabled-test', 'z-ai', 'admin.accounts.clinepassPin.lastKnownNone'],
+    ['cline-free/glm-5.3-flash', 'z-ai', 'admin.accounts.clinepassPin.lastKnownNone']
+  ])('uses the same prefix priority for %s / %s', async (model, provider, expected) => {
     vi.mocked(getUpstreamPin).mockResolvedValue({ config: {
       mode: 'strict', match_prefixes: ['fallback'], models: {
         'deepseek*': { upstream: 'deepseek' }, 'deepseek-v4*': { upstream: 'novita' },
@@ -43,11 +43,8 @@ describe('ClinePass platform-only routing diagnostics', () => {
     vi.mocked(listLastKnown).mockResolvedValue({ account_id: 1, items: [{ ...observation, model, provider }] })
     const wrapper = mountStatus()
     await flushPromises()
-    if (matched === null) {
-      expect(wrapper.find('[data-testid="clinepass-lastknown-verdict"]').exists()).toBe(false)
-    } else {
-      expect(wrapper.get('[data-testid="clinepass-lastknown-verdict"]').text()).toBe(verdict + (matched ? 'Match' : 'Mismatch'))
-    }
+    expect(wrapper.get('[data-testid="clinepass-lastknown-row"]').text()).toContain(verdict + 'Expected: ' + expected)
+    expect(wrapper.find('[data-testid="clinepass-lastknown-verdict"]').exists()).toBe(false)
   })
   beforeEach(() => {
     vi.resetAllMocks()
@@ -76,14 +73,14 @@ describe('ClinePass platform-only routing diagnostics', () => {
     expect(row.text()).toContain('deepseek')
     expect(row.text()).toContain('novita, wafer')
     expect(row.text()).toContain('2026')
-    expect(wrapper.get('[data-testid="clinepass-lastknown-verdict"]').text()).toBe(verdict + 'Match')
+    expect(wrapper.find('[data-testid="clinepass-lastknown-verdict"]').exists()).toBe(false)
   })
 
   it('flags a mismatch against the platform upstream', async () => {
     vi.mocked(listLastKnown).mockResolvedValue({ account_id: 1, items: [{ ...observation, provider: 'morph' }] })
     const wrapper = mountStatus()
     await flushPromises()
-    expect(wrapper.get('[data-testid="clinepass-lastknown-verdict"]').text()).toBe(verdict + 'Mismatch')
+    expect(wrapper.find('[data-testid="clinepass-lastknown-verdict"]').exists()).toBe(false)
   })
 
   it.each([null, { mode: 'off' as const }])('does not report pinning when platform is %j', async config => {
@@ -110,7 +107,7 @@ describe('ClinePass platform-only routing diagnostics', () => {
     })
     const wrapper = mountStatus()
     await flushPromises()
-    expect(wrapper.get('[data-testid="clinepass-lastknown-verdict"]').text()).toBe(verdict + 'Match')
+    expect(wrapper.find('[data-testid="clinepass-lastknown-verdict"]').exists()).toBe(false)
   })
 
   it('uses platform per-model overrides and explicit allow lists', async () => {
@@ -119,7 +116,7 @@ describe('ClinePass platform-only routing diagnostics', () => {
     } })
     const wrapper = mountStatus()
     await flushPromises()
-    expect(wrapper.get('[data-testid="clinepass-lastknown-verdict"]').text()).toBe(verdict + 'Match')
+    expect(wrapper.find('[data-testid="clinepass-lastknown-verdict"]').exists()).toBe(false)
   })
 
   it('follows strict upstream priority even when an explicit allow list differs', async () => {
@@ -128,7 +125,7 @@ describe('ClinePass platform-only routing diagnostics', () => {
     } })
     const wrapper = mountStatus()
     await flushPromises()
-    expect(wrapper.get('[data-testid="clinepass-lastknown-verdict"]').text()).toBe(verdict + 'Mismatch')
+    expect(wrapper.find('[data-testid="clinepass-lastknown-verdict"]').exists()).toBe(false)
   })
 
   it('honors a platform per-model off override', async () => {
@@ -147,7 +144,7 @@ describe('ClinePass platform-only routing diagnostics', () => {
     await wrapper.get('[data-testid="clinepass-lastknown-refresh"]').trigger('click')
     await flushPromises()
     expect(getUpstreamPin).toHaveBeenCalledTimes(2)
-    expect(wrapper.get('[data-testid="clinepass-lastknown-verdict"]').text()).toBe(verdict + 'Mismatch')
+    expect(wrapper.find('[data-testid="clinepass-lastknown-verdict"]').exists()).toBe(false)
   })
 
   it('renders an empty state when no hit has been observed', async () => {

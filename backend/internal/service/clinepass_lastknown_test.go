@@ -4,8 +4,15 @@ package service
 
 import (
 	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
@@ -60,7 +67,7 @@ func TestParseClinePassRoutingDirect(t *testing.T) {
 	require.Equal(t, "direct", got.Pipeline)
 	require.Equal(t, "deep-infra", got.FinalProvider)
 	require.Equal(t, "Deep Infra", got.FinalProviderName)
-	require.Equal(t, "z-ai/glm-5.3-flash", got.CanonicalSlug)
+	require.Empty(t, got.CanonicalSlug)
 }
 
 // Streaming chunks are wrapped in a {"data": {...}} envelope.
@@ -70,6 +77,13 @@ func TestParseClinePassRoutingDataEnvelope(t *testing.T) {
 	require.NotNil(t, got)
 	require.Equal(t, "planner", got.Pipeline)
 	require.Equal(t, "openrouter", got.FinalProvider)
+}
+
+func TestParseClinePassRoutingDelta(t *testing.T) {
+	raw := `{"choices":[{"delta":{"provider_metadata":{"gateway":{"routing":{"finalProvider":"deepinfra"}}}}}]}`
+	got := ParseClinePassRouting([]byte(raw))
+	require.NotNil(t, got)
+	require.Equal(t, "deepinfra", got.FinalProvider)
 }
 
 // No routing information -> nil, so callers never persist an empty observation.
@@ -90,6 +104,46 @@ func TestClinePassSlugify(t *testing.T) {
 
 // RecordClinePassRouting persists the observation with the effective model and
 // falls back to the model carried inside the routing payload.
+func TestClinePassStreamRoutingPersistence(t *testing.T) {
+	const payload = "data: {\"model\":\"vendor/model\",\"choices\":[{\"delta\":{\"content\":\"hello\",\"provider_metadata\":{\"gateway\":{\"routing\":{\"finalProvider\":\"deepinfra\"}}}}}]}\n\ndata: [DONE]\n\n"
+	for _, tc := range []struct {
+		name      string
+		aggregate bool
+		platform  string
+		want      bool
+	}{
+		{"aggregate", true, PlatformClinePass, true},
+		{"converted stream", false, PlatformClinePass, true},
+		{"other platform", false, PlatformOpenAI, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &fakeClinePassLastKnownStore{}
+			svc := &OpenAIGatewayService{}
+			svc.SetClinePassLastKnownStore(store)
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
+			resp := &http.Response{Header: make(http.Header), Body: io.NopCloser(strings.NewReader(payload))}
+			account := &Account{ID: 1751, Platform: tc.platform}
+			if tc.aggregate {
+				_, _, _, err := svc.aggregateClinePassStreamBody(c, resp, account, "requested-model", "vendor/model", time.Now())
+				require.NoError(t, err)
+			} else {
+				state := svc.scanCCStream(c, resp, "test", "", time.Now(), account, "requested-model", func(*apicompat.ChatCompletionsChunk) {})
+				require.NoError(t, state.Err)
+				require.True(t, state.SawDone)
+			}
+			if !tc.want {
+				require.Empty(t, store.upserts)
+				return
+			}
+			require.Len(t, store.upserts, 1)
+			require.Equal(t, int64(1751), store.upserts[0].AccountID)
+			require.Equal(t, "requested-model", store.upserts[0].Model)
+			require.Equal(t, "deepinfra", store.upserts[0].Provider)
+		})
+	}
+}
+
 func TestRecordClinePassRoutingPersists(t *testing.T) {
 	store := &fakeClinePassLastKnownStore{}
 	svc := &OpenAIGatewayService{}

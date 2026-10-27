@@ -211,6 +211,8 @@ func ProvideAccountHandler(
 	rpmCache service.RPMCache,
 	tokenCacheInvalidator service.TokenCacheInvalidator,
 	grokQuotaService *service.GrokQuotaService,
+	clinePassLastKnown service.ClinePassLastKnownStore,
+	gateway *service.OpenAIGatewayService,
 ) *AccountHandler {
 	handler := NewAccountHandler(
 		adminService,
@@ -229,6 +231,8 @@ func ProvideAccountHandler(
 		tokenCacheInvalidator,
 	)
 	handler.grokImportProber = grokQuotaService
+	handler.SetClinePassLastKnownStore(clinePassLastKnown)
+	gateway.SetClinePassLastKnownStore(clinePassLastKnown)
 	handler.cfg = cfg
 	return handler
 }

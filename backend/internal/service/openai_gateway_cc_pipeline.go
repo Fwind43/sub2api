@@ -289,9 +289,17 @@ func (s *OpenAIGatewayService) scanCCStream(
 	logPrefix string,
 	requestID string,
 	startTime time.Time,
+	account *Account,
+	originalModel string,
 	emit func(*apicompat.ChatCompletionsChunk),
 ) ccStreamScanState {
 	var st ccStreamScanState
+	var lastRouting *ClinePassRouting
+	defer func() {
+		if account != nil && account.Platform == PlatformClinePass && lastRouting != nil {
+			s.RecordClinePassRouting(c.Request.Context(), account.ID, originalModel, lastRouting)
+		}
+	}()
 
 	scanner := s.newUpstreamSSEScanner(resp.Body)
 	for scanner.Scan() {
@@ -307,6 +315,11 @@ func (s *OpenAIGatewayService) scanCCStream(
 		if payload == "[DONE]" {
 			st.SawDone = true
 			break
+		}
+		if account != nil && account.Platform == PlatformClinePass {
+			if routing := ParseClinePassRouting([]byte(payload)); routing != nil {
+				lastRouting = routing
+			}
 		}
 		// 观察上游 CC chunk 回显的 model / service_tier（计费以回显为准）。
 		// CC chunk 无 type 字段，按 untyped payload 观察（上游约束：只有终止
