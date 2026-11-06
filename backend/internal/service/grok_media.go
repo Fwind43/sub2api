@@ -666,7 +666,13 @@ func (s *OpenAIGatewayService) ForwardGrokMedia(
 	if err != nil {
 		return nil, err
 	}
+	if endpoint == GrokMediaEndpointVideoStatus && isAsyncGrokVideoRequestID(requestID) {
+		return s.forwardAsyncGrokMediaVideoStatus(ctx, c, account, token, requestID, startTime)
+	}
 	if endpoint == GrokMediaEndpointVideoContent {
+		if isAsyncGrokVideoRequestID(requestID) {
+			return s.forwardAsyncGrokMediaVideoContent(ctx, c, account, token, requestID, startTime)
+		}
 		return s.forwardGrokMediaVideoContent(ctx, c, account, token, requestID, startTime)
 	}
 	targetURL, err := buildGrokMediaURL(account, s.cfg, endpoint, requestID)
@@ -698,6 +704,9 @@ func (s *OpenAIGatewayService) ForwardGrokMedia(
 	body, contentType, err = sanitizeGrokMediaForwardBody(endpoint, body, contentType)
 	if err != nil {
 		return nil, err
+	}
+	if shouldWrapGrokVideoAsync(endpoint, requestInfo.Model, upstreamModel) {
+		return s.startAsyncGrokMediaVideoCreate(ctx, c, account, token, endpoint, targetURL, body, contentType, requestInfo, upstreamModel, startTime)
 	}
 
 	var bodyReader io.Reader

@@ -299,6 +299,10 @@ type OpenAIForwardResult struct {
 	// AudioUsage carries Voice billing units when present.
 	AudioUsage *AudioUsage
 
+	// AsyncVideoStart launches detached upstream video generation after the
+	// handler has persisted account binding and create-time pending billing.
+	AsyncVideoStart func(onComplete func(*OpenAIForwardResult))
+
 	wsReplayInput                []json.RawMessage
 	wsReplayInputExists          bool
 	wsAccountFailoverReplayInput []json.RawMessage

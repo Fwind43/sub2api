@@ -477,8 +477,9 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 
 		h.gatewayService.ReportOpenAIAccountScheduleResult(account, grokMediaScheduleModel(account, routingModel, result), true, nil)
 		if isGrokVideoCreateEndpoint(endpoint) && strings.TrimSpace(result.ResponseID) != "" {
+			persistCtx, cancelPersist := context.WithTimeout(context.WithoutCancel(requestCtx), 10*time.Second)
 			if err := h.gatewayService.BindGrokMediaVideoRequestAccount(
-				requestCtx, apiKey.GroupID, result.ResponseID, subject.UserID, apiKey.ID, account.ID,
+				persistCtx, apiKey.GroupID, result.ResponseID, subject.UserID, apiKey.ID, account.ID,
 			); err != nil {
 				reqLog.Warn("grok_media.bind_video_request_account_failed",
 					zap.Int64("account_id", account.ID),
@@ -499,13 +500,13 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 				// Wall-clock start for usage duration_ms: create accepted → first done discovery.
 				CreatedAt: videoCreateStartedAt,
 			}
-			if err := h.gatewayService.StoreGrokVideoPendingBilling(requestCtx, result.ResponseID, subject.UserID, apiKey.ID, pending); err != nil {
+			if err := h.gatewayService.StoreGrokVideoPendingBilling(persistCtx, result.ResponseID, subject.UserID, apiKey.ID, pending); err != nil {
 				reqLog.Warn("grok_media.store_video_pending_billing_failed_retrying",
 					zap.Int64("account_id", account.ID),
 					zap.String("request_id", result.ResponseID),
 					zap.Error(err),
 				)
-				if err2 := h.gatewayService.StoreGrokVideoPendingBilling(requestCtx, result.ResponseID, subject.UserID, apiKey.ID, pending); err2 != nil {
+				if err2 := h.gatewayService.StoreGrokVideoPendingBilling(persistCtx, result.ResponseID, subject.UserID, apiKey.ID, pending); err2 != nil {
 					// Response body may already be committed; completion path will fail-closed
 					// when pending is still missing and status cannot price duration.
 					reqLog.Error("grok_media.store_video_pending_billing_failed",
@@ -514,6 +515,20 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 						zap.Error(err2),
 					)
 				}
+			}
+			cancelPersist()
+			if result.AsyncVideoStart != nil {
+				usageMeta := extractGrokMediaUsageMeta(c, account, apiKey, requestModel)
+				taskRequestID := strings.TrimSpace(result.ResponseID)
+				reqBodyCopy := append([]byte(nil), body...)
+				result.AsyncVideoStart(func(doneResult *service.OpenAIForwardResult) {
+					billCtx, cancelBill := context.WithTimeout(context.Background(), 15*time.Second)
+					defer cancelBill()
+					billed := prepareGrokVideoCompletionBilling(billCtx, h, reqLog, apiKey, subject, taskRequestID, doneResult)
+					if billed != nil && shouldRecordGrokMediaUsage(service.GrokMediaEndpointVideoStatus, requestModel, billed) {
+						recordGrokMediaUsageWithMeta(billCtx, usageMeta, h, reqLog, apiKey, subject, subscription, account, billed, requestModel, reqBodyCopy, taskRequestID)
+					}
+				})
 			}
 		}
 		// Status poll OR content download can observe official done+video.url.
@@ -624,9 +639,11 @@ func prepareGrokVideoCompletionBilling(
 	if taskRequestID == "" {
 		return nil
 	}
+	storeCtx, cancelStore := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancelStore()
 	// Load create-time snapshot before claim so we can fail-closed without burning the claim
 	// when Redis lost pending and status cannot price the job.
-	pending, loadErr := h.gatewayService.LoadGrokVideoPendingBilling(ctx, taskRequestID, subject.UserID, apiKey.ID)
+	pending, loadErr := h.gatewayService.LoadGrokVideoPendingBilling(storeCtx, taskRequestID, subject.UserID, apiKey.ID)
 	if loadErr != nil {
 		reqLog.Warn("grok_media.video_pending_billing_load_failed", zap.String("request_id", taskRequestID), zap.Error(loadErr))
 	}
@@ -646,7 +663,7 @@ func prepareGrokVideoCompletionBilling(
 			zap.String("note", "resolution falls back to default 480p; investigate pending store failures"),
 		)
 	}
-	claimed, err := h.gatewayService.ClaimGrokVideoBilling(ctx, taskRequestID, subject.UserID, apiKey.ID)
+	claimed, err := h.gatewayService.ClaimGrokVideoBilling(storeCtx, taskRequestID, subject.UserID, apiKey.ID)
 	if err != nil {
 		reqLog.Warn("grok_media.video_billing_claim_failed", zap.String("request_id", taskRequestID), zap.Error(err))
 		return nil
@@ -715,6 +732,39 @@ func firstNonEmptyString(values ...string) string {
 	return ""
 }
 
+type grokMediaUsageMeta struct {
+	userAgent          string
+	clientIP           string
+	sessionID          string
+	inboundEndpoint    string
+	upstreamEndpoint   string
+	quotaPlatform      string
+	channelUsageFields service.ChannelUsageFields
+}
+
+func extractGrokMediaUsageMeta(
+	c *gin.Context,
+	account *service.Account,
+	apiKey *service.APIKey,
+	requestModel string,
+) grokMediaUsageMeta {
+	return grokMediaUsageMeta{
+		userAgent:        c.GetHeader("User-Agent"),
+		clientIP:         ip.GetClientIP(c),
+		sessionID:        service.ExtractClientSessionID(c),
+		inboundEndpoint:  GetInboundEndpoint(c),
+		upstreamEndpoint: GetUpstreamEndpoint(c, account.Platform),
+		quotaPlatform:    service.QuotaPlatform(c.Request.Context(), apiKey),
+		// OriginalModel 记录客户端请求的模型：composite 分组下 body 已被改写为具体模型，
+		// 公开别名需从 context 取回，与其他端点的用量归因口径一致（计费不受影响：
+		// BillingModelSource 为空不会触发来源覆盖）。
+		channelUsageFields: service.ChannelUsageFields{
+			OriginalModel:      clientRequestedModel(c, requestModel),
+			ChannelMappedModel: requestModel,
+		},
+	}
+}
+
 func recordGrokMediaUsage(
 	c *gin.Context,
 	h *OpenAIGatewayHandler,
@@ -728,23 +778,29 @@ func recordGrokMediaUsage(
 	body []byte,
 	requestID string,
 ) {
-	userAgent := c.GetHeader("User-Agent")
-	clientIP := ip.GetClientIP(c)
-	sessionID := service.ExtractClientSessionID(c)
+	meta := extractGrokMediaUsageMeta(c, account, apiKey, requestModel)
+	recordGrokMediaUsageWithMeta(c.Request.Context(), meta, h, reqLog, apiKey, subject, subscription, account, result, requestModel, body, requestID)
+}
+
+func recordGrokMediaUsageWithMeta(
+	reqCtx context.Context,
+	meta grokMediaUsageMeta,
+	h *OpenAIGatewayHandler,
+	reqLog *zap.Logger,
+	apiKey *service.APIKey,
+	subject middleware2.AuthSubject,
+	subscription *service.UserSubscription,
+	account *service.Account,
+	result *service.OpenAIForwardResult,
+	requestModel string,
+	body []byte,
+	requestID string,
+) {
 	payloadForHash := body
 	if len(payloadForHash) == 0 && strings.TrimSpace(requestID) != "" {
 		payloadForHash = []byte(requestID)
 	}
-	inboundEndpoint := GetInboundEndpoint(c)
-	upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
-	quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
-	// OriginalModel 记录客户端请求的模型：composite 分组下 body 已被改写为具体模型，
-	// 公开别名需从 context 取回，与其他端点的用量归因口径一致（计费不受影响：
-	// BillingModelSource 为空不会触发来源覆盖）。
-	channelUsageFields := service.ChannelUsageFields{
-		OriginalModel:      clientRequestedModel(c, requestModel),
-		ChannelMappedModel: requestModel,
-	}
+	channelUsageFields := meta.channelUsageFields
 	// Async video: force durable task request id and release claim if billing fails.
 	videoTaskID := ""
 	if result != nil && (result.VideoCount > 0 || strings.HasPrefix(result.ResponseID, "seedance:")) {
@@ -757,21 +813,21 @@ func recordGrokMediaUsage(
 			payloadForHash = []byte(videoTaskID)
 		}
 	}
-	h.submitOpenAIUsageRecordTask(c.Request.Context(), result, func(ctx context.Context) {
+	h.submitOpenAIUsageRecordTask(reqCtx, result, func(ctx context.Context) {
 		if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
 			Result:             result,
 			APIKey:             apiKey,
 			User:               apiKey.User,
 			Account:            account,
 			Subscription:       subscription,
-			InboundEndpoint:    inboundEndpoint,
-			UpstreamEndpoint:   upstreamEndpoint,
-			UserAgent:          userAgent,
-			IPAddress:          clientIP,
+			InboundEndpoint:    meta.inboundEndpoint,
+			UpstreamEndpoint:   meta.upstreamEndpoint,
+			UserAgent:          meta.userAgent,
+			IPAddress:          meta.clientIP,
 			RequestPayloadHash: service.HashUsageRequestPayload(payloadForHash),
 			APIKeyService:      h.apiKeyService,
-			QuotaPlatform:      quotaPlatform,
-			SessionID:          sessionID,
+			QuotaPlatform:      meta.quotaPlatform,
+			SessionID:          meta.sessionID,
 			ChannelUsageFields: channelUsageFields,
 		}); err != nil {
 			if videoTaskID != "" {

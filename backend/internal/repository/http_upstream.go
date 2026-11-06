@@ -982,6 +982,10 @@ func (s *httpUpstreamService) applyProfilePoolSettings(settings poolSettings, pr
 		if s != nil && s.cfg != nil {
 			settings.responseHeaderTimeout = time.Duration(s.cfg.Gateway.GrokResponseHeaderTimeout) * time.Second
 		}
+	case service.HTTPUpstreamProfileLongVideo:
+		// Sync-blocking video upstreams (e.g. GeToken MiniMax-H3 GPU cold start)
+		// may hold response headers for 10-20 minutes; bound via request context.
+		settings.responseHeaderTimeout = 0
 	}
 	return settings
 }
@@ -1060,7 +1064,7 @@ func (s *httpUpstreamService) resolveOpenAIHTTP2Settings() openAIHTTP2Settings {
 }
 
 func (s *httpUpstreamService) resolveProtocolMode(profile service.HTTPUpstreamProfile, proxyKey string, parsedProxy *url.URL) string {
-	if profile == service.HTTPUpstreamProfileLongStream {
+	if profile == service.HTTPUpstreamProfileLongStream || profile == service.HTTPUpstreamProfileLongVideo {
 		return upstreamProtocolModeLongStreamH2
 	}
 	if profile == service.HTTPUpstreamProfileGrok {
