@@ -525,7 +525,10 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 					billCtx, cancelBill := context.WithTimeout(context.Background(), 15*time.Second)
 					defer cancelBill()
 					billed := prepareGrokVideoCompletionBilling(billCtx, h, reqLog, apiKey, subject, taskRequestID, doneResult)
-					if billed != nil && shouldRecordGrokMediaUsage(service.GrokMediaEndpointVideoStatus, requestModel, billed) {
+					// prepareGrokVideoCompletionBilling has already validated the completed
+					// video and claimed billing. The immediate image-only gate rejects
+					// video status results and would strand that claim without usage.
+					if billed != nil {
 						recordGrokMediaUsageWithMeta(billCtx, usageMeta, h, reqLog, apiKey, subject, subscription, account, billed, requestModel, reqBodyCopy, taskRequestID)
 					}
 				})
