@@ -104,6 +104,10 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 	}
 
 	contentType := c.GetHeader("Content-Type")
+	if err := service.ValidateGrokMediaVideoRequest(endpoint, contentType, body); err != nil {
+		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+		return
+	}
 	requestInfo := service.ParseGrokMediaRequest(contentType, body)
 	if endpoint == service.SeedanceEndpointCreate {
 		requestInfo, err = service.ParseSeedanceRequest(body)
@@ -540,7 +544,7 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 			if billResult := prepareSeedanceCompletionBilling(requestCtx, h, apiKey, subject, requestID, result); billResult != nil {
 				recordGrokMediaUsage(c, h, reqLog, apiKey, subject, subscription, account, billResult, billResult.Model, body, requestID)
 			}
-		} else if endpoint == service.GrokMediaEndpointVideoStatus || endpoint == service.GrokMediaEndpointVideoContent {
+		} else if endpoint == service.GrokMediaEndpointVideoStatus || endpoint == service.GrokMediaEndpointVideosGenerationsStatus || endpoint == service.GrokMediaEndpointVideoContent {
 			taskID := strings.TrimSpace(requestID)
 			if billResult := prepareGrokVideoCompletionBilling(requestCtx, h, reqLog, apiKey, subject, taskID, result); billResult != nil {
 				recordGrokMediaUsage(c, h, reqLog, apiKey, subject, subscription, account, billResult, billResult.Model, body, taskID)
@@ -713,8 +717,12 @@ func prepareGrokVideoCompletionBilling(
 	merged.ImageCount = 0
 	// Official default resolution is 480p when the create request omitted it.
 	merged.VideoResolution = service.NormalizeVideoBillingResolutionOrDefault(merged.VideoResolution)
-	// Official default duration is 8s when neither status nor create provided it.
-	merged.VideoDurationSeconds = service.NormalizeVideoBillingDurationSecondsOrDefault(merged.VideoDurationSeconds)
+	// Official default duration is 6s for MiniMax-H3 (4-15s) or 8s for Grok video when neither status nor create provided it.
+	if service.IsMiniMaxVideoModel(firstNonEmptyString(merged.BillingModel, merged.Model, merged.UpstreamModel)) {
+		merged.VideoDurationSeconds = service.NormalizeMiniMaxH3DurationSecondsOrDefault(merged.VideoDurationSeconds)
+	} else {
+		merged.VideoDurationSeconds = service.NormalizeVideoBillingDurationSecondsOrDefault(merged.VideoDurationSeconds)
+	}
 	// E2E latency for async video: create accept → this discovery of done+url.
 	// Bill on discovery (status/content), not after further client polls; duration
 	// must not be only the single discovery hop (~hundreds of ms).

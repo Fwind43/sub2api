@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -28,9 +29,10 @@ const (
 	GrokMediaEndpointImagesEdits       GrokMediaEndpoint = "images_edits"
 	GrokMediaEndpointVideosGenerations GrokMediaEndpoint = "videos_generations"
 	GrokMediaEndpointVideosEdits       GrokMediaEndpoint = "videos_edits"
-	GrokMediaEndpointVideosExtensions  GrokMediaEndpoint = "videos_extensions"
-	GrokMediaEndpointVideoStatus       GrokMediaEndpoint = "video_status"
-	GrokMediaEndpointVideoContent      GrokMediaEndpoint = "video_content"
+	GrokMediaEndpointVideosExtensions        GrokMediaEndpoint = "videos_extensions"
+	GrokMediaEndpointVideoStatus             GrokMediaEndpoint = "video_status"
+	GrokMediaEndpointVideosGenerationsStatus GrokMediaEndpoint = "videos_generations_status"
+	GrokMediaEndpointVideoContent            GrokMediaEndpoint = "video_content"
 
 	// Official xAI Imagine image-edit limit.
 	grokMediaMaxEditSourceImages = 3
@@ -41,7 +43,7 @@ func (e GrokMediaEndpoint) RequiresRequestBody() bool {
 }
 
 func (e GrokMediaEndpoint) IsVideoLookupRequest() bool {
-	return e == GrokMediaEndpointVideoStatus || e == GrokMediaEndpointVideoContent || e == SeedanceEndpointStatus || e == SeedanceEndpointDelete
+	return e == GrokMediaEndpointVideoStatus || e == GrokMediaEndpointVideosGenerationsStatus || e == GrokMediaEndpointVideoContent || e == SeedanceEndpointStatus || e == SeedanceEndpointDelete
 }
 
 func (e GrokMediaEndpoint) IsGenerationRequest() bool {
@@ -135,11 +137,123 @@ func ParseGrokMediaRequest(contentType string, body []byte) GrokMediaRequestInfo
 	info.AspectRatio = strings.TrimSpace(info.AspectRatio)
 	info.ImageResolution = grokImagineImageResolution(info.ImageResolution)
 	info.Resolution = NormalizeVideoBillingResolutionOrDefault(info.Resolution)
-	info.DurationSeconds = NormalizeVideoBillingDurationSecondsOrDefault(info.DurationSeconds)
+	if IsAsyncGrokVideoModel(info.Model) {
+		info.DurationSeconds = NormalizeMiniMaxH3DurationSecondsOrDefault(info.DurationSeconds)
+	} else {
+		info.DurationSeconds = NormalizeVideoBillingDurationSecondsOrDefault(info.DurationSeconds)
+	}
 	if info.N <= 0 {
 		info.N = 1
 	}
 	return info
+}
+
+const (
+	MiniMaxH3MinDurationSeconds             = 4
+	MiniMaxH3MaxDurationSeconds             = 15
+	MiniMaxH3DefaultDurationSeconds         = 6
+	GrokMediaMaxVideoConditionsDecodedBytes = 8 * 1024 * 1024 // 8 MiB
+)
+
+func IsMiniMaxVideoModel(model string) bool {
+	return isMiniMaxVideoModel(model)
+}
+
+func NormalizeMiniMaxH3DurationSecondsOrDefault(durationSeconds int) int {
+	if durationSeconds <= 0 {
+		return MiniMaxH3DefaultDurationSeconds
+	}
+	if durationSeconds < MiniMaxH3MinDurationSeconds {
+		return MiniMaxH3MinDurationSeconds
+	}
+	if durationSeconds > MiniMaxH3MaxDurationSeconds {
+		return MiniMaxH3MaxDurationSeconds
+	}
+	return durationSeconds
+}
+
+func ValidateGrokMediaVideoRequest(endpoint GrokMediaEndpoint, contentType string, body []byte) error {
+	switch endpoint {
+	case GrokMediaEndpointVideosGenerations, GrokMediaEndpointVideosEdits, GrokMediaEndpointVideosExtensions:
+	default:
+		return nil
+	}
+	if len(body) == 0 || !gjson.ValidBytes(body) {
+		return nil
+	}
+	model := strings.TrimSpace(gjson.GetBytes(body, "model").String())
+	if IsAsyncGrokVideoModel(model) {
+		if duration := gjson.GetBytes(body, "duration"); duration.Exists() && duration.Type != gjson.Null {
+			if duration.Type != gjson.Number || float64(duration.Int()) != duration.Float() {
+				return fmt.Errorf("MiniMax-H3 duration must be an integer between %d and %d seconds", MiniMaxH3MinDurationSeconds, MiniMaxH3MaxDurationSeconds)
+			}
+			sec := int(duration.Int())
+			if sec < MiniMaxH3MinDurationSeconds || sec > MiniMaxH3MaxDurationSeconds {
+				return fmt.Errorf("MiniMax-H3 duration must be between %d and %d seconds (got %d)", MiniMaxH3MinDurationSeconds, MiniMaxH3MaxDurationSeconds, sec)
+			}
+		}
+	}
+	if conditions := gjson.GetBytes(body, "conditions"); conditions.Exists() && conditions.IsArray() {
+		totalBytes := estimateGrokMediaConditionsDecodedBytes(conditions)
+		if totalBytes > GrokMediaMaxVideoConditionsDecodedBytes {
+			return fmt.Errorf("conditions reference media decoded size (%d bytes) exceeds maximum 8 MiB (%d bytes)", totalBytes, GrokMediaMaxVideoConditionsDecodedBytes)
+		}
+	}
+	return nil
+}
+
+func estimateGrokMediaConditionsDecodedBytes(conditions gjson.Result) int {
+	total := 0
+	for _, cond := range conditions.Array() {
+		for _, field := range []string{"images", "videos", "audios"} {
+			items := cond.Get(field)
+			if !items.Exists() || !items.IsArray() {
+				continue
+			}
+			for _, item := range items.Array() {
+				raw := strings.TrimSpace(item.String())
+				if item.IsObject() {
+					raw = firstNonEmpty(
+						strings.TrimSpace(item.Get("url").String()),
+						strings.TrimSpace(item.Get("image_url.url").String()),
+						strings.TrimSpace(item.Get("data").String()),
+					)
+				}
+				total += estimateDataURLOrBase64DecodedBytes(raw)
+			}
+		}
+	}
+	return total
+}
+
+func estimateDataURLOrBase64DecodedBytes(raw string) int {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || strings.HasPrefix(raw, "http://") || strings.HasPrefix(raw, "https://") {
+		return 0
+	}
+	payload := raw
+	if strings.HasPrefix(strings.ToLower(raw), "data:") {
+		idx := strings.IndexByte(raw, ',')
+		if idx < 0 {
+			return 0
+		}
+		meta := strings.ToLower(raw[:idx])
+		payload = raw[idx+1:]
+		if !strings.Contains(meta, ";base64") {
+			return len(payload)
+		}
+	}
+	payload = strings.TrimSpace(payload)
+	if payload == "" {
+		return 0
+	}
+	if decoded, err := base64.StdEncoding.DecodeString(payload); err == nil {
+		return len(decoded)
+	}
+	if decoded, err := base64.RawStdEncoding.DecodeString(strings.TrimRight(payload, "=")); err == nil {
+		return len(decoded)
+	}
+	return (len(payload) * 3) / 4
 }
 
 func parseGrokMediaJSONRequest(body []byte, info *GrokMediaRequestInfo) {
@@ -565,7 +679,13 @@ func IsGrokVideoStatusBillable(statusBody []byte) bool {
 	if !isOfficialGrokVideoStatusDone(statusBody) {
 		return false
 	}
-	return strings.TrimSpace(gjson.GetBytes(statusBody, "video.url").String()) != ""
+	return firstNonEmpty(
+		strings.TrimSpace(gjson.GetBytes(statusBody, "video.url").String()),
+		strings.TrimSpace(gjson.GetBytes(statusBody, "content_url").String()),
+		strings.TrimSpace(gjson.GetBytes(statusBody, "url").String()),
+		strings.TrimSpace(gjson.GetBytes(statusBody, "video_url").String()),
+		strings.TrimSpace(gjson.GetBytes(statusBody, "data.0.url").String()),
+	) != ""
 }
 
 func isOfficialGrokVideoStatusDone(statusBody []byte) bool {
@@ -591,11 +711,16 @@ func ExtractGrokVideoBillingFromStatusBody(statusBody []byte, pending *GrokVideo
 	if gjson.ValidBytes(statusBody) {
 		// Official: top-level model.
 		model = strings.TrimSpace(gjson.GetBytes(statusBody, "model").String())
-		// Official: video.duration (number of seconds).
+		// Official: video.duration (number of seconds), or GeToken top-level duration.
 		if v := gjson.GetBytes(statusBody, "video.duration"); v.Exists() && v.Type == gjson.Number {
 			durationSeconds = int(v.Int())
 			if durationSeconds == 0 && v.Float() > 0 {
 				// Sub-second values are unexpected for this API; still accept truncated int path above.
+				durationSeconds = int(v.Float())
+			}
+		} else if v := gjson.GetBytes(statusBody, "duration"); v.Exists() && v.Type == gjson.Number {
+			durationSeconds = int(v.Int())
+			if durationSeconds == 0 && v.Float() > 0 {
 				durationSeconds = int(v.Float())
 			}
 		}
@@ -628,7 +753,11 @@ func ExtractGrokVideoBillingFromStatusBody(statusBody []byte, pending *GrokVideo
 		resolution = NormalizeVideoBillingResolutionOrDefault(resolution)
 	}
 	if durationSeconds > 0 {
-		durationSeconds = NormalizeVideoBillingDurationSecondsOrDefault(durationSeconds)
+		if IsAsyncGrokVideoModel(model) || IsAsyncGrokVideoModel(billingModel) || IsAsyncGrokVideoModel(upstreamModel) {
+			durationSeconds = NormalizeMiniMaxH3DurationSecondsOrDefault(durationSeconds)
+		} else {
+			durationSeconds = NormalizeVideoBillingDurationSecondsOrDefault(durationSeconds)
+		}
 	}
 	responseID := extractGrokMediaVideoRequestID(statusBody)
 	if responseID == "" {
@@ -688,6 +817,12 @@ func (s *OpenAIGatewayService) ForwardGrokMedia(
 	if err != nil {
 		return nil, err
 	}
+	if err := ValidateGrokMediaVideoRequest(endpoint, contentType, body); err != nil {
+		writeGrokMediaErrorResponse(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+		return &OpenAIForwardResult{
+			Duration: time.Since(startTime),
+		}, nil
+	}
 	requestInfo := ParseGrokMediaRequest(contentType, body)
 	upstreamModel := requestInfo.Model
 	if endpoint.RequiresRequestBody() && gjson.ValidBytes(body) {
@@ -700,6 +835,15 @@ func (s *OpenAIGatewayService) ForwardGrokMedia(
 				return nil, fmt.Errorf("rewrite grok media account mapped model: %w", err)
 			}
 		}
+	}
+	if err := ValidateGrokMediaVideoRequest(endpoint, contentType, body); err != nil {
+		writeGrokMediaErrorResponse(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+		return &OpenAIForwardResult{
+			Model:         requestInfo.Model,
+			BillingModel:  requestInfo.Model,
+			UpstreamModel: upstreamModel,
+			Duration:      time.Since(startTime),
+		}, nil
 	}
 	body, contentType, err = sanitizeGrokMediaForwardBody(endpoint, body, contentType)
 	if err != nil {
@@ -721,6 +865,13 @@ func (s *OpenAIGatewayService) ForwardGrokMedia(
 	}
 	upstreamReq.Header.Set("Authorization", "Bearer "+token)
 	upstreamReq.Header.Set("Accept", "application/json")
+	if c != nil && c.Request != nil {
+		for _, hdr := range []string{"Prefer", "Idempotency-Key"} {
+			if val := strings.TrimSpace(c.GetHeader(hdr)); val != "" {
+				upstreamReq.Header.Set(hdr, val)
+			}
+		}
+	}
 	if account.IsGrokOAuth() && isGrokCLIProxyTarget(targetURL) {
 		applyGrokCLIHeaders(upstreamReq.Header)
 	}
@@ -745,6 +896,32 @@ func (s *OpenAIGatewayService) ForwardGrokMedia(
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
 	}
 	defer func() { _ = resp.Body.Close() }()
+
+	if endpoint == GrokMediaEndpointVideoStatus &&
+		(resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed) {
+		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+		resp.Body = io.NopCloser(bytes.NewReader(errBody))
+		if !isGrokVideoJobNotFound(errBody) {
+			if legacyURL, legacyErr := buildGrokMediaLegacyVideoStatusURL(account, s.cfg, requestID); legacyErr == nil {
+				if legacyReq, reqErr := http.NewRequestWithContext(upstreamCtx, http.MethodGet, legacyURL, nil); reqErr == nil {
+					legacyReq.Header.Set("Authorization", "Bearer "+token)
+					legacyReq.Header.Set("Accept", "application/json")
+					if account.IsGrokOAuth() && isGrokCLIProxyTarget(legacyURL) {
+						applyGrokCLIHeaders(legacyReq.Header)
+					}
+					account.ApplyHeaderOverrides(legacyReq.Header)
+					if legacyResp, doErr := s.httpUpstream.Do(legacyReq, proxyURL, account.ID, account.Concurrency); doErr == nil {
+						if legacyResp.StatusCode < 400 {
+							_ = resp.Body.Close()
+							resp = legacyResp
+						} else {
+							_ = legacyResp.Body.Close()
+						}
+					}
+				}
+			}
+		}
+	}
 
 	requestIDHeader := firstNonEmpty(resp.Header.Get("x-request-id"), resp.Header.Get("xai-request-id"))
 	requestModel := requestInfo.Model
@@ -1405,6 +1582,11 @@ func writeGrokMediaResponse(c *gin.Context, resp *http.Response, body []byte, fi
 		return
 	}
 	writeOpenAIPassthroughResponseHeaders(c.Writer.Header(), resp.Header, filter)
+	for _, hdr := range []string{"Location", "Retry-After"} {
+		if val := strings.TrimSpace(resp.Header.Get(hdr)); val != "" {
+			c.Header(hdr, val)
+		}
+	}
 	contentType := strings.TrimSpace(resp.Header.Get("Content-Type"))
 	if contentType == "" {
 		contentType = "application/json"
@@ -1422,7 +1604,11 @@ func writeGrokMediaContentResponse(c *gin.Context, resp *http.Response) error {
 		"Content-Length",
 		"Content-Range",
 		"Accept-Ranges",
+		"Cache-Control",
 		"Content-Disposition",
+		"ETag",
+		"Last-Modified",
+		"X-Content-SHA256",
 	} {
 		if value := strings.TrimSpace(resp.Header.Get(name)); value != "" {
 			c.Header(name, value)
@@ -1533,9 +1719,24 @@ func isGrokMediaVideoContentURL(rawURL, requestID string) bool {
 	if err != nil {
 		return false
 	}
-	return segments[len(segments)-3] == "videos" &&
-		decodedID == requestID &&
-		segments[len(segments)-1] == "content"
+	if segments[len(segments)-3] != "videos" || segments[len(segments)-1] != "content" {
+		return false
+	}
+	if decodedID == requestID {
+		return true
+	}
+	return parsed.Scheme == "" && parsed.Host == "" && strings.TrimSpace(decodedID) != ""
+}
+
+func grokMediaStatusProxyURL(c *gin.Context, requestID string) string {
+	if c == nil || c.Request == nil || c.Request.URL == nil || strings.TrimSpace(requestID) == "" {
+		return ""
+	}
+	pathPrefix := ""
+	if strings.HasPrefix(c.Request.URL.Path, "/v1/") {
+		pathPrefix = "/v1"
+	}
+	return pathPrefix + "/videos/" + url.PathEscape(strings.Trim(requestID, "/"))
 }
 
 func grokMediaContentProxyURL(c *gin.Context, requestID string) string {
@@ -1547,4 +1748,18 @@ func grokMediaContentProxyURL(c *gin.Context, requestID string) string {
 		pathPrefix = "/v1"
 	}
 	return pathPrefix + "/videos/" + url.PathEscape(strings.Trim(requestID, "/")) + "/content"
+}
+
+func isMiniMaxVideoModel(model string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(model))
+	return strings.HasPrefix(normalized, "minimax-h3") || strings.HasPrefix(normalized, "minimax-hailuo")
+}
+
+func IsAsyncGrokVideoModel(model string) bool {
+	return isMiniMaxVideoModel(model)
+}
+
+func isGrokVideoJobNotFound(body []byte) bool {
+	return gjson.ValidBytes(body) &&
+		strings.EqualFold(strings.TrimSpace(gjson.GetBytes(body, "error.code").String()), "video_job_not_found")
 }

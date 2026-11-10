@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -45,8 +46,12 @@ func grokAsyncTestContext(method, rawURL string, headers map[string]string) (*gi
 }
 
 func grokAsyncJSONResponse(body string) *http.Response {
+	return grokAsyncStatusJSONResponse(http.StatusOK, body)
+}
+
+func grokAsyncStatusJSONResponse(statusCode int, body string) *http.Response {
 	return &http.Response{
-		StatusCode: http.StatusOK,
+		StatusCode: statusCode,
 		Header:     http.Header{"Content-Type": []string{"application/json"}},
 		Body:       io.NopCloser(strings.NewReader(body)),
 	}
@@ -341,4 +346,141 @@ func TestStartAsyncGrokVideoGeneration_PropagatesUpstreamErrorToStatus(t *testin
 	require.NoError(t, err)
 	require.Equal(t, http.StatusServiceUnavailable, statusRecorder.Code)
 	require.Contains(t, statusRecorder.Body.String(), "MiniMax-H3 GPU node unavailable")
+}
+
+func TestValidateGrokMediaVideoRequest_MiniMaxH3DurationAndConditions(t *testing.T) {
+	t.Parallel()
+
+	for _, validDuration := range []int{4, 6, 8, 12, 15} {
+		body := []byte(fmt.Sprintf(`{"model":"MiniMax-H3","prompt":"test","duration":%d}`, validDuration))
+		require.NoError(t, ValidateGrokMediaVideoRequest(GrokMediaEndpointVideosGenerations, "application/json", body))
+	}
+
+	for _, invalidBody := range []string{
+		`{"model":"MiniMax-H3","prompt":"test","duration":3}`,
+		`{"model":"MiniMax-H3","prompt":"test","duration":16}`,
+		`{"model":"MiniMax-H3","prompt":"test","duration":6.5}`,
+	} {
+		err := ValidateGrokMediaVideoRequest(GrokMediaEndpointVideosGenerations, "application/json", []byte(invalidBody))
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "MiniMax-H3 duration")
+	}
+
+	reqInfo := ParseGrokMediaRequest("application/json", []byte(`{"model":"MiniMax-H3","prompt":"test","duration":12}`))
+	require.Equal(t, 12, reqInfo.DurationSeconds)
+	defaultInfo := ParseGrokMediaRequest("application/json", []byte(`{"model":"MiniMax-H3","prompt":"test"}`))
+	require.Equal(t, 6, defaultInfo.DurationSeconds)
+}
+
+func TestStartAsyncGrokVideoGeneration_GeTokenNativeAsyncRelativeContentURLAndVideoJobNotFound(t *testing.T) {
+	t.Parallel()
+
+	upstreamHits := make(chan string, 8)
+	upstreamClient := &blockingAsyncVideoUpstreamStub{
+		handler: func(r *http.Request) (*http.Response, error) {
+			switch {
+			case r.Method == http.MethodPost && r.URL.Path == "/v1/videos/generations":
+				require.Equal(t, "respond-async", r.Header.Get("Prefer"))
+				require.Equal(t, "client-idem-123", r.Header.Get("Idempotency-Key"))
+				upstreamHits <- "POST /v1/videos/generations"
+				return grokAsyncStatusJSONResponse(
+					http.StatusAccepted,
+					`{"id":"mmh3-native-1","request_id":"mmh3-native-1","object":"video.generation","model":"MiniMax-H3","status":"pending","status_url":"/v1/videos/mmh3-native-1","content_url":"/v1/videos/mmh3-native-1/content","poll_after_ms":5000}`,
+				), nil
+			case r.Method == http.MethodGet && r.URL.Path == "/v1/videos/mmh3-native-1":
+				upstreamHits <- "GET /v1/videos/mmh3-native-1"
+				return grokAsyncStatusJSONResponse(
+					http.StatusOK,
+					`{"id":"mmh3-native-1","request_id":"mmh3-native-1","object":"video.generation","model":"MiniMax-H3","status":"done","resolution":"768p","duration":12,"status_url":"/v1/videos/mmh3-native-1","content_url":"/v1/videos/mmh3-native-1/content"}`,
+				), nil
+			case r.Method == http.MethodGet && r.URL.Path == "/v1/videos/mmh3-missing-1":
+				upstreamHits <- "GET /v1/videos/mmh3-missing-1"
+				return grokAsyncStatusJSONResponse(
+					http.StatusNotFound,
+					`{"error":{"message":"video job not found","type":"invalid_request_error","code":"video_job_not_found"}}`,
+				), nil
+			default:
+				return grokAsyncStatusJSONResponse(http.StatusNotFound, `{"error":"unexpected path"}`), nil
+			}
+		},
+	}
+
+	cache := &asyncVideoTestGatewayCache{}
+	svc := &OpenAIGatewayService{
+		cfg:          &config.Config{},
+		cache:        cache,
+		httpUpstream: upstreamClient,
+	}
+
+	createGinCtx, createRecorder := grokAsyncTestContext(
+		http.MethodPost,
+		"https://code.fwind.work/v1/videos/generations",
+		map[string]string{
+			"Content-Type":    "application/json",
+			"Prefer":          "respond-async",
+			"Idempotency-Key": "client-idem-123",
+		},
+	)
+	createRes, err := svc.ForwardGrokMedia(
+		context.Background(),
+		createGinCtx,
+		grokAsyncTestAccount(),
+		GrokMediaEndpointVideosGenerations,
+		"",
+		[]byte(`{"model":"MiniMax-H3","prompt":"native async","resolution":"768p","duration":12}`),
+		"application/json",
+	)
+	require.NoError(t, err)
+	require.NotNil(t, createRes)
+	require.Equal(t, http.StatusAccepted, createRecorder.Code)
+	require.Contains(t, createRecorder.Header().Get("Location"), "/v1/videos/"+createRes.ResponseID)
+	require.Equal(t, "5", createRecorder.Header().Get("Retry-After"))
+	syntheticID := createRes.ResponseID
+	createRes.AsyncVideoStart(nil)
+
+	select {
+	case <-upstreamHits:
+	case <-time.After(3 * time.Second):
+		t.Fatal("background upstream POST did not complete")
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	statusCtx, statusRecorder := grokAsyncTestContext(
+		http.MethodGet,
+		"https://code.fwind.work/v1/videos/"+syntheticID,
+		nil,
+	)
+	statusRes, err := svc.ForwardGrokMedia(
+		context.Background(),
+		statusCtx,
+		grokAsyncTestAccount(),
+		GrokMediaEndpointVideoStatus,
+		syntheticID,
+		nil,
+		"",
+	)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, statusRecorder.Code)
+	require.Equal(t, 1, statusRes.VideoCount)
+	require.Equal(t, 12, statusRes.VideoDurationSeconds)
+	require.Equal(t, "/v1/videos/"+syntheticID+"/content", gjson.GetBytes(statusRecorder.Body.Bytes(), "content_url").String())
+
+	// Also verify direct upstream status lookup on 404 video_job_not_found does NOT fall back to /v1/videos/generations/:id
+	missingCtx, missingRecorder := grokAsyncTestContext(
+		http.MethodGet,
+		"https://code.fwind.work/v1/videos/mmh3-missing-1",
+		nil,
+	)
+	_, err = svc.ForwardGrokMedia(
+		context.Background(),
+		missingCtx,
+		grokAsyncTestAccount(),
+		GrokMediaEndpointVideoStatus,
+		"mmh3-missing-1",
+		nil,
+		"",
+	)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusNotFound, missingRecorder.Code)
+	require.Equal(t, "video_job_not_found", gjson.GetBytes(missingRecorder.Body.Bytes(), "error.code").String())
 }

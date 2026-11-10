@@ -26,15 +26,37 @@ const (
 )
 
 type grokAsyncVideoJobState struct {
-	SyntheticID  string `json:"synthetic_id"`
-	UpstreamID   string `json:"upstream_id,omitempty"`
-	Status       string `json:"status"` // "pending" | "done" | "failed"
-	Model        string `json:"model,omitempty"`
-	UpstreamBody string `json:"upstream_body,omitempty"`
-	ErrorCode    int    `json:"error_code,omitempty"`
-	ErrorBody    string `json:"error_body,omitempty"`
-	CreatedAt    int64  `json:"created_at"`
-	UpdatedAt    int64  `json:"updated_at"`
+	SyntheticID     string `json:"synthetic_id"`
+	UpstreamID      string `json:"upstream_id,omitempty"`
+	Status          string `json:"status"` // "pending" | "done" | "failed"
+	Model           string `json:"model,omitempty"`
+	Resolution      string `json:"resolution,omitempty"`
+	DurationSeconds int    `json:"duration_seconds,omitempty"`
+	UpstreamBody    string `json:"upstream_body,omitempty"`
+	ErrorCode       int    `json:"error_code,omitempty"`
+	ErrorBody       string `json:"error_body,omitempty"`
+	CreatedAt       int64  `json:"created_at"`
+	UpdatedAt       int64  `json:"updated_at"`
+}
+
+type grokVideoJobNotFoundError struct {
+	Body []byte
+}
+
+func (e *grokVideoJobNotFoundError) Error() string {
+	return "video_job_not_found"
+}
+
+func isAsyncGrokVideoFailedStatusBody(body []byte) bool {
+	if !gjson.ValidBytes(body) {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(gjson.GetBytes(body, "status").String())) {
+	case "failed", "error", "expired", "cancelled", "canceled":
+		return true
+	}
+	errVal := gjson.GetBytes(body, "error")
+	return errVal.Exists() && errVal.Type != gjson.Null && strings.TrimSpace(errVal.Raw) != "{}" && strings.TrimSpace(errVal.String()) != ""
 }
 
 func shouldWrapGrokVideoAsync(endpoint GrokMediaEndpoint, requestModel, upstreamModel string) bool {
@@ -71,7 +93,14 @@ func (s *OpenAIGatewayService) storeGrokAsyncVideoJobState(ctx context.Context, 
 	}
 	storeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
-	return s.cache.SetGrokVideoPendingBilling(storeCtx, grokAsyncVideoCacheKeyPref+id, raw, grokVideoPendingBillingTTL(s.cfg))
+	ttl := grokVideoPendingBillingTTL(s.cfg)
+	if err := s.cache.SetGrokVideoPendingBilling(storeCtx, grokAsyncVideoCacheKeyPref+id, raw, ttl); err != nil {
+		return err
+	}
+	if upstreamID := strings.TrimSpace(state.UpstreamID); upstreamID != "" && upstreamID != id {
+		_ = s.cache.SetGrokVideoPendingBilling(storeCtx, grokAsyncVideoCacheKeyPref+upstreamID, raw, ttl)
+	}
+	return nil
 }
 
 func (s *OpenAIGatewayService) getGrokAsyncVideoJobState(ctx context.Context, syntheticID string) (*grokAsyncVideoJobState, error) {
@@ -95,7 +124,7 @@ func (s *OpenAIGatewayService) getGrokAsyncVideoJobState(ctx context.Context, sy
 	return &state, nil
 }
 
-func rewriteAsyncGrokVideoStatusBody(body []byte, upstreamID, syntheticID, contentProxyURL string) []byte {
+func rewriteAsyncGrokVideoStatusBody(body []byte, upstreamID, syntheticID, statusProxyURL, contentProxyURL string) []byte {
 	if len(body) == 0 {
 		return body
 	}
@@ -107,20 +136,21 @@ func rewriteAsyncGrokVideoStatusBody(body []byte, upstreamID, syntheticID, conte
 	if !gjson.ValidBytes(out) {
 		return out
 	}
-	if gjson.GetBytes(out, "request_id").Exists() {
-		if updated, err := sjson.SetBytes(out, "request_id", syntheticID); err == nil {
+	if strings.TrimSpace(statusProxyURL) != "" && gjson.GetBytes(out, "status_url").Exists() {
+		if updated, err := sjson.SetBytes(out, "status_url", statusProxyURL); err == nil {
 			out = updated
 		}
 	}
-	if gjson.GetBytes(out, "id").Exists() {
-		if updated, err := sjson.SetBytes(out, "id", syntheticID); err == nil {
+	if strings.TrimSpace(contentProxyURL) != "" && gjson.GetBytes(out, "content_url").Exists() {
+		if updated, err := sjson.SetBytes(out, "content_url", contentProxyURL); err == nil {
 			out = updated
 		}
 	}
-	if !gjson.GetBytes(out, "request_id").Exists() && !gjson.GetBytes(out, "id").Exists() {
-		if updated, err := sjson.SetBytes(out, "request_id", syntheticID); err == nil {
-			out = updated
-		}
+	if updated, err := sjson.SetBytes(out, "request_id", syntheticID); err == nil {
+		out = updated
+	}
+	if updated, err := sjson.SetBytes(out, "id", syntheticID); err == nil {
+		out = updated
 	}
 	return out
 }
@@ -141,23 +171,45 @@ func (s *OpenAIGatewayService) startAsyncGrokMediaVideoCreate(
 	syntheticID := grokAsyncVideoIDPrefix + uuid.NewString()
 	requestModel := requestInfo.Model
 	initialState := grokAsyncVideoJobState{
-		SyntheticID: syntheticID,
-		Status:      "pending",
-		Model:       firstNonEmpty(requestModel, upstreamModel),
-		CreatedAt:   startTime.UnixMilli(),
+		SyntheticID:     syntheticID,
+		Status:          "pending",
+		Model:           firstNonEmpty(requestModel, upstreamModel),
+		Resolution:      requestInfo.Resolution,
+		DurationSeconds: requestInfo.DurationSeconds,
+		CreatedAt:       startTime.UnixMilli(),
 	}
 	if err := s.storeGrokAsyncVideoJobState(ctx, initialState); err != nil {
 		return nil, fmt.Errorf("store async video job state: %w", err)
 	}
 
+	statusProxyURL := grokMediaStatusProxyURL(c, syntheticID)
 	contentProxyURL := grokMediaContentProxyURL(c, syntheticID)
+	clientIdempotencyKey := ""
+	if c != nil {
+		clientIdempotencyKey = strings.TrimSpace(c.GetHeader("Idempotency-Key"))
+	}
 	bodyCopy := append([]byte(nil), body...)
+	statusURLVal := firstNonEmpty(statusProxyURL, "/v1/videos/"+syntheticID)
+	contentURLVal := firstNonEmpty(contentProxyURL, "/v1/videos/"+syntheticID+"/content")
 	initResp, _ := json.Marshal(map[string]any{
-		"request_id": syntheticID,
-		"status":     "pending",
+		"id":            syntheticID,
+		"request_id":    syntheticID,
+		"object":        "video.generation",
+		"model":         firstNonEmpty(requestModel, upstreamModel),
+		"status":        "pending",
+		"created_at":    startTime.Unix(),
+		"status_url":    statusURLVal,
+		"content_url":   contentURLVal,
+		"poll_after_ms": 5000,
 	})
 	if c != nil {
-		c.Data(http.StatusOK, "application/json", initResp)
+		c.Header("Location", statusURLVal)
+		c.Header("Retry-After", "5")
+		statusCode := http.StatusOK
+		if strings.Contains(strings.ToLower(c.GetHeader("Prefer")), "respond-async") {
+			statusCode = http.StatusAccepted
+		}
+		c.Data(statusCode, "application/json", initResp)
 	}
 
 	result := &OpenAIForwardResult{
@@ -183,7 +235,9 @@ func (s *OpenAIGatewayService) startAsyncGrokMediaVideoCreate(
 			requestInfo,
 			upstreamModel,
 			syntheticID,
+			statusProxyURL,
 			contentProxyURL,
+			clientIdempotencyKey,
 			startTime,
 			onComplete,
 		)
@@ -202,7 +256,9 @@ func (s *OpenAIGatewayService) runAsyncGrokMediaVideoCreate(
 	requestInfo GrokMediaRequestInfo,
 	upstreamModel string,
 	syntheticID string,
+	statusProxyURL string,
 	contentProxyURL string,
+	clientIdempotencyKey string,
 	startTime time.Time,
 	onComplete func(*OpenAIForwardResult),
 ) {
@@ -224,17 +280,21 @@ func (s *OpenAIGatewayService) runAsyncGrokMediaVideoCreate(
 	if err != nil {
 		bgLog.Warn("grok_media.async_video_build_request_failed", zap.Error(err))
 		_ = s.storeGrokAsyncVideoJobState(context.Background(), grokAsyncVideoJobState{
-			SyntheticID: syntheticID,
-			Status:      "failed",
-			Model:       firstNonEmpty(requestInfo.Model, upstreamModel),
-			ErrorCode:   http.StatusBadGateway,
-			ErrorBody:   `{"error":{"message":"failed to build upstream video request","type":"upstream_error"}}`,
-			CreatedAt:   startTime.UnixMilli(),
+			SyntheticID:     syntheticID,
+			Status:          "failed",
+			Model:           firstNonEmpty(requestInfo.Model, upstreamModel),
+			Resolution:      requestInfo.Resolution,
+			DurationSeconds: requestInfo.DurationSeconds,
+			ErrorCode:       http.StatusBadGateway,
+			ErrorBody:       `{"error":{"message":"failed to build upstream video request","type":"upstream_error"}}`,
+			CreatedAt:       startTime.UnixMilli(),
 		})
 		return
 	}
 	upstreamReq.Header.Set("Authorization", "Bearer "+token)
 	upstreamReq.Header.Set("Accept", "application/json")
+	upstreamReq.Header.Set("Prefer", "respond-async")
+	upstreamReq.Header.Set("Idempotency-Key", firstNonEmpty(clientIdempotencyKey, syntheticID))
 	if account.IsGrokOAuth() && isGrokCLIProxyTarget(targetURL) {
 		applyGrokCLIHeaders(upstreamReq.Header)
 	}
@@ -262,12 +322,14 @@ func (s *OpenAIGatewayService) runAsyncGrokMediaVideoCreate(
 			},
 		})
 		_ = s.storeGrokAsyncVideoJobState(context.Background(), grokAsyncVideoJobState{
-			SyntheticID: syntheticID,
-			Status:      "failed",
-			Model:       firstNonEmpty(requestInfo.Model, upstreamModel),
-			ErrorCode:   http.StatusBadGateway,
-			ErrorBody:   string(errJSON),
-			CreatedAt:   startTime.UnixMilli(),
+			SyntheticID:     syntheticID,
+			Status:          "failed",
+			Model:           firstNonEmpty(requestInfo.Model, upstreamModel),
+			Resolution:      requestInfo.Resolution,
+			DurationSeconds: requestInfo.DurationSeconds,
+			ErrorCode:       http.StatusBadGateway,
+			ErrorBody:       string(errJSON),
+			CreatedAt:       startTime.UnixMilli(),
 		})
 		return
 	}
@@ -279,12 +341,14 @@ func (s *OpenAIGatewayService) runAsyncGrokMediaVideoCreate(
 	if readErr != nil {
 		bgLog.Warn("grok_media.async_video_read_response_failed", zap.Error(readErr))
 		_ = s.storeGrokAsyncVideoJobState(context.Background(), grokAsyncVideoJobState{
-			SyntheticID: syntheticID,
-			Status:      "failed",
-			Model:       firstNonEmpty(requestModel, upstreamModel),
-			ErrorCode:   http.StatusBadGateway,
-			ErrorBody:   `{"error":{"message":"failed to read upstream video response","type":"upstream_error"}}`,
-			CreatedAt:   startTime.UnixMilli(),
+			SyntheticID:     syntheticID,
+			Status:          "failed",
+			Model:           firstNonEmpty(requestModel, upstreamModel),
+			Resolution:      requestInfo.Resolution,
+			DurationSeconds: requestInfo.DurationSeconds,
+			ErrorCode:       http.StatusBadGateway,
+			ErrorBody:       `{"error":{"message":"failed to read upstream video response","type":"upstream_error"}}`,
+			CreatedAt:       startTime.UnixMilli(),
 		})
 		return
 	}
@@ -295,12 +359,14 @@ func (s *OpenAIGatewayService) runAsyncGrokMediaVideoCreate(
 			zap.String("body", truncateString(string(respBody), 512)),
 		)
 		_ = s.storeGrokAsyncVideoJobState(context.Background(), grokAsyncVideoJobState{
-			SyntheticID: syntheticID,
-			Status:      "failed",
-			Model:       firstNonEmpty(requestModel, upstreamModel),
-			ErrorCode:   resp.StatusCode,
-			ErrorBody:   string(respBody),
-			CreatedAt:   startTime.UnixMilli(),
+			SyntheticID:     syntheticID,
+			Status:          "failed",
+			Model:           firstNonEmpty(requestModel, upstreamModel),
+			Resolution:      requestInfo.Resolution,
+			DurationSeconds: requestInfo.DurationSeconds,
+			ErrorCode:       resp.StatusCode,
+			ErrorBody:       string(respBody),
+			CreatedAt:       startTime.UnixMilli(),
 		})
 		return
 	}
@@ -309,7 +375,7 @@ func (s *OpenAIGatewayService) runAsyncGrokMediaVideoCreate(
 	upstreamID := strings.TrimSpace(firstNonEmpty(extractGrokMediaVideoRequestID(respBody), requestIDHeader))
 	statusBody := respBody
 
-	if upstreamID != "" && strings.TrimSpace(gjson.GetBytes(statusBody, "video.url").String()) == "" {
+	if upstreamID != "" && strings.TrimSpace(gjson.GetBytes(statusBody, "video.url").String()) == "" && !isAsyncGrokVideoFailedStatusBody(statusBody) {
 		if fetched, fetchErr := s.fetchAsyncUpstreamVideoStatusBody(upstreamCtx, account, token, proxyURL, upstreamID); fetchErr == nil && len(fetched) > 0 {
 			statusBody = fetched
 		} else if fetchErr != nil {
@@ -320,25 +386,31 @@ func (s *OpenAIGatewayService) runAsyncGrokMediaVideoCreate(
 		}
 	}
 
-	rewrittenBody := rewriteAsyncGrokVideoStatusBody(statusBody, upstreamID, syntheticID, contentProxyURL)
+	rewrittenBody := rewriteAsyncGrokVideoStatusBody(statusBody, upstreamID, syntheticID, statusProxyURL, contentProxyURL)
 	billed := ExtractGrokVideoBillingFromStatusBody(rewrittenBody, nil, syntheticID)
 	jobStatus := "pending"
 	if billed != nil {
 		jobStatus = "done"
-	} else if st := strings.ToLower(strings.TrimSpace(gjson.GetBytes(rewrittenBody, "status").String())); st == "failed" || st == "error" || st == "expired" {
+	} else if isAsyncGrokVideoFailedStatusBody(rewrittenBody) {
 		jobStatus = "failed"
 	}
 
 	state := grokAsyncVideoJobState{
-		SyntheticID:  syntheticID,
-		UpstreamID:   upstreamID,
-		Status:       jobStatus,
-		Model:        firstNonEmpty(requestModel, upstreamModel),
-		UpstreamBody: string(rewrittenBody),
-		CreatedAt:    startTime.UnixMilli(),
+		SyntheticID:     syntheticID,
+		UpstreamID:      upstreamID,
+		Status:          jobStatus,
+		Model:           firstNonEmpty(requestModel, upstreamModel),
+		Resolution:      requestInfo.Resolution,
+		DurationSeconds: requestInfo.DurationSeconds,
+		UpstreamBody:    string(rewrittenBody),
+		CreatedAt:       startTime.UnixMilli(),
 	}
 	if jobStatus == "failed" {
-		state.ErrorCode = http.StatusBadGateway
+		if gjson.ValidBytes(rewrittenBody) && strings.TrimSpace(gjson.GetBytes(rewrittenBody, "status").String()) != "" {
+			state.ErrorCode = http.StatusOK
+		} else {
+			state.ErrorCode = http.StatusBadGateway
+		}
 		state.ErrorBody = string(rewrittenBody)
 	}
 	if err := s.storeGrokAsyncVideoJobState(context.Background(), state); err != nil {
@@ -379,36 +451,60 @@ func (s *OpenAIGatewayService) fetchAsyncUpstreamVideoStatusBody(
 	proxyURL string,
 	upstreamID string,
 ) ([]byte, error) {
-	statusURL, err := buildGrokMediaURL(account, s.cfg, GrokMediaEndpointVideoStatus, upstreamID)
-	if err != nil {
-		return nil, err
+	endpoints := []GrokMediaEndpoint{
+		GrokMediaEndpointVideoStatus,
+		GrokMediaEndpointVideosGenerationsStatus,
 	}
-	statusCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
-	defer cancel()
-	req, err := http.NewRequestWithContext(statusCtx, http.MethodGet, statusURL, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Accept", "application/json")
-	if account.IsGrokOAuth() && isGrokCLIProxyTarget(statusURL) {
-		applyGrokCLIHeaders(req.Header)
-	}
-	account.ApplyHeaderOverrides(req.Header)
+	var lastErr error
+	for idx, ep := range endpoints {
+		statusURL, err := buildGrokMediaURL(account, s.cfg, ep, upstreamID)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		statusCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		req, err := http.NewRequestWithContext(statusCtx, http.MethodGet, statusURL, nil)
+		if err != nil {
+			cancel()
+			lastErr = err
+			continue
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Accept", "application/json")
+		if account.IsGrokOAuth() && isGrokCLIProxyTarget(statusURL) {
+			applyGrokCLIHeaders(req.Header)
+		}
+		account.ApplyHeaderOverrides(req.Header)
 
-	resp, err := s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
-	if err != nil {
-		return nil, err
+		resp, err := s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
+		if err != nil {
+			cancel()
+			lastErr = err
+			continue
+		}
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, grokAsyncVideoMaxBodyBytes))
+		_ = resp.Body.Close()
+		cancel()
+		if readErr != nil {
+			lastErr = readErr
+			continue
+		}
+		if resp.StatusCode == http.StatusNotFound && isGrokVideoJobNotFound(body) {
+			return body, &grokVideoJobNotFoundError{Body: body}
+		}
+		if idx == 0 && (resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed) {
+			lastErr = fmt.Errorf("upstream status http %d: %s", resp.StatusCode, truncateString(string(body), 256))
+			continue
+		}
+		if resp.StatusCode >= 400 {
+			return nil, fmt.Errorf("upstream status http %d: %s", resp.StatusCode, truncateString(string(body), 256))
+		}
+		return body, nil
 	}
-	defer func() { _ = resp.Body.Close() }()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, grokAsyncVideoMaxBodyBytes))
-	if err != nil {
-		return nil, err
+	if lastErr != nil {
+		return nil, lastErr
 	}
-	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("upstream status http %d: %s", resp.StatusCode, truncateString(string(body), 256))
-	}
-	return body, nil
+	return nil, fmt.Errorf("failed to fetch upstream video status")
 }
 
 func (s *OpenAIGatewayService) forwardAsyncGrokMediaVideoStatus(
@@ -427,6 +523,7 @@ func (s *OpenAIGatewayService) forwardAsyncGrokMediaVideoStatus(
 		if c != nil {
 			c.JSON(http.StatusNotFound, gin.H{
 				"error": gin.H{
+					"code":    "video_job_not_found",
 					"message": "Video request not found or expired",
 					"type":    "invalid_request_error",
 				},
@@ -440,15 +537,20 @@ func (s *OpenAIGatewayService) forwardAsyncGrokMediaVideoStatus(
 		}, nil
 	}
 
+	statusProxyURL := grokMediaStatusProxyURL(c, syntheticID)
 	contentProxyURL := grokMediaContentProxyURL(c, syntheticID)
 	if state.Status == "failed" {
-		statusCode := state.ErrorCode
-		if statusCode < 400 {
-			statusCode = http.StatusBadGateway
-		}
 		errBody := strings.TrimSpace(state.ErrorBody)
 		if errBody == "" {
-			errBody = `{"error":{"message":"upstream video generation failed","type":"upstream_error"}}`
+			errBody = `{"error":{"code":"video_generation_failed","message":"upstream video generation failed","type":"upstream_error"}}`
+		}
+		statusCode := state.ErrorCode
+		if statusCode < 400 {
+			if gjson.ValidBytes([]byte(errBody)) && strings.TrimSpace(gjson.GetBytes([]byte(errBody), "status").String()) != "" {
+				statusCode = http.StatusOK
+			} else {
+				statusCode = http.StatusBadGateway
+			}
 		}
 		if c != nil {
 			c.Data(statusCode, "application/json", []byte(errBody))
@@ -462,7 +564,7 @@ func (s *OpenAIGatewayService) forwardAsyncGrokMediaVideoStatus(
 	}
 
 	if state.Status == "done" && strings.TrimSpace(state.UpstreamBody) != "" {
-		respBody := rewriteAsyncGrokVideoStatusBody([]byte(state.UpstreamBody), state.UpstreamID, syntheticID, contentProxyURL)
+		respBody := rewriteAsyncGrokVideoStatusBody([]byte(state.UpstreamBody), state.UpstreamID, syntheticID, statusProxyURL, contentProxyURL)
 		if c != nil {
 			c.Data(http.StatusOK, "application/json", respBody)
 		}
@@ -475,6 +577,12 @@ func (s *OpenAIGatewayService) forwardAsyncGrokMediaVideoStatus(
 			if strings.TrimSpace(billed.BillingModel) == "" {
 				billed.BillingModel = billed.Model
 			}
+			if strings.TrimSpace(billed.VideoResolution) == "" {
+				billed.VideoResolution = state.Resolution
+			}
+			if billed.VideoDurationSeconds <= 0 {
+				billed.VideoDurationSeconds = state.DurationSeconds
+			}
 			billed.Duration = time.Since(startTime)
 			return billed, nil
 		}
@@ -486,8 +594,28 @@ func (s *OpenAIGatewayService) forwardAsyncGrokMediaVideoStatus(
 		if account.ProxyID != nil && account.Proxy != nil {
 			proxyURL = account.Proxy.URL()
 		}
-		if liveBody, fetchErr := s.fetchAsyncUpstreamVideoStatusBody(ctx, account, token, proxyURL, state.UpstreamID); fetchErr == nil && len(liveBody) > 0 {
-			rewritten := rewriteAsyncGrokVideoStatusBody(liveBody, state.UpstreamID, syntheticID, contentProxyURL)
+		liveBody, fetchErr := s.fetchAsyncUpstreamVideoStatusBody(ctx, account, token, proxyURL, state.UpstreamID)
+		if notFoundErr, ok := fetchErr.(*grokVideoJobNotFoundError); ok && notFoundErr != nil {
+			errBody := notFoundErr.Body
+			if len(bytes.TrimSpace(errBody)) == 0 {
+				errBody = []byte(`{"error":{"code":"video_job_not_found","message":"Video generation job was not found","type":"invalid_request_error"}}`)
+			}
+			state.Status = "failed"
+			state.ErrorCode = http.StatusNotFound
+			state.ErrorBody = string(errBody)
+			_ = s.storeGrokAsyncVideoJobState(ctx, *state)
+			if c != nil {
+				c.Data(http.StatusNotFound, "application/json", errBody)
+			}
+			return &OpenAIForwardResult{
+				RequestID:  syntheticID,
+				ResponseID: syntheticID,
+				Model:      state.Model,
+				Duration:   time.Since(startTime),
+			}, nil
+		}
+		if fetchErr == nil && len(liveBody) > 0 {
+			rewritten := rewriteAsyncGrokVideoStatusBody(liveBody, state.UpstreamID, syntheticID, statusProxyURL, contentProxyURL)
 			if billed := ExtractGrokVideoBillingFromStatusBody(rewritten, nil, syntheticID); billed != nil {
 				state.Status = "done"
 				state.UpstreamBody = string(rewritten)
@@ -503,10 +631,33 @@ func (s *OpenAIGatewayService) forwardAsyncGrokMediaVideoStatus(
 				if strings.TrimSpace(billed.BillingModel) == "" {
 					billed.BillingModel = billed.Model
 				}
+				if strings.TrimSpace(billed.VideoResolution) == "" {
+					billed.VideoResolution = state.Resolution
+				}
+				if billed.VideoDurationSeconds <= 0 {
+					billed.VideoDurationSeconds = state.DurationSeconds
+				}
 				billed.Duration = time.Since(startTime)
 				return billed, nil
 			}
+			if isAsyncGrokVideoFailedStatusBody(rewritten) {
+				state.Status = "failed"
+				state.UpstreamBody = string(rewritten)
+				state.ErrorBody = string(rewritten)
+				state.ErrorCode = http.StatusOK
+				_ = s.storeGrokAsyncVideoJobState(ctx, *state)
+				if c != nil {
+					c.Data(http.StatusOK, "application/json", rewritten)
+				}
+				return &OpenAIForwardResult{
+					RequestID:  syntheticID,
+					ResponseID: syntheticID,
+					Model:      state.Model,
+					Duration:   time.Since(startTime),
+				}, nil
+			}
 			if c != nil {
+				c.Header("Retry-After", "5")
 				c.Data(http.StatusOK, "application/json", rewritten)
 			}
 			return &OpenAIForwardResult{
@@ -518,11 +669,20 @@ func (s *OpenAIGatewayService) forwardAsyncGrokMediaVideoStatus(
 		}
 	}
 
+	statusURLVal := firstNonEmpty(statusProxyURL, "/v1/videos/"+syntheticID)
+	contentURLVal := firstNonEmpty(contentProxyURL, "/v1/videos/"+syntheticID+"/content")
 	pendingBody, _ := json.Marshal(map[string]any{
-		"request_id": syntheticID,
-		"status":     "pending",
+		"id":            syntheticID,
+		"request_id":    syntheticID,
+		"object":        "video.generation",
+		"model":         state.Model,
+		"status":        "pending",
+		"status_url":    statusURLVal,
+		"content_url":   contentURLVal,
+		"poll_after_ms": 5000,
 	})
 	if c != nil {
+		c.Header("Retry-After", "5")
 		c.Data(http.StatusOK, "application/json", pendingBody)
 	}
 	return &OpenAIForwardResult{
@@ -545,16 +705,44 @@ func (s *OpenAIGatewayService) forwardAsyncGrokMediaVideoContent(
 	if err != nil {
 		return nil, fmt.Errorf("read async video job state: %w", err)
 	}
+	if state != nil && state.Status == "failed" {
+		statusCode := http.StatusConflict
+		code := "video_generation_failed"
+		msg := "Video generation failed"
+		if state.ErrorCode == http.StatusNotFound {
+			statusCode = http.StatusNotFound
+			code = "video_job_not_found"
+			msg = "Video generation job was not found"
+		}
+		if c != nil {
+			c.JSON(statusCode, gin.H{
+				"error": gin.H{
+					"code":    code,
+					"message": msg,
+					"type":    "invalid_request_error",
+				},
+			})
+		}
+		return &OpenAIForwardResult{
+			RequestID:  syntheticID,
+			ResponseID: syntheticID,
+			Model:      state.Model,
+			Duration:   time.Since(startTime),
+		}, nil
+	}
 	if state == nil || strings.TrimSpace(state.UpstreamID) == "" {
 		statusCode := http.StatusNotFound
+		code := "video_job_not_found"
 		msg := "Video content is not ready or request not found"
 		if state != nil && state.Status == "pending" {
 			statusCode = http.StatusConflict
+			code = "video_not_ready"
 			msg = "Video generation is still in progress"
 		}
 		if c != nil {
 			c.JSON(statusCode, gin.H{
 				"error": gin.H{
+					"code":    code,
 					"message": msg,
 					"type":    "invalid_request_error",
 				},
@@ -579,6 +767,17 @@ func (s *OpenAIGatewayService) forwardAsyncGrokMediaVideoContent(
 		}
 		if strings.TrimSpace(res.BillingModel) == "" {
 			res.BillingModel = res.Model
+		}
+		if c != nil && c.Writer.Status() == http.StatusOK {
+			if res.VideoCount <= 0 {
+				res.VideoCount = 1
+			}
+			if strings.TrimSpace(res.VideoResolution) == "" {
+				res.VideoResolution = state.Resolution
+			}
+			if res.VideoDurationSeconds <= 0 {
+				res.VideoDurationSeconds = state.DurationSeconds
+			}
 		}
 	}
 	return res, nil

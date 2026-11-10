@@ -130,6 +130,8 @@ func buildGrokMediaURL(account *Account, cfg *config.Config, endpoint GrokMediaE
 		return xai.BuildVideosExtensionsURLWithValidator(baseURL, validator)
 	case GrokMediaEndpointVideoStatus:
 		return xai.BuildVideoURLWithValidator(baseURL, requestID, validator)
+	case GrokMediaEndpointVideosGenerationsStatus:
+		return buildGrokMediaLegacyVideoStatusURL(account, cfg, requestID)
 	case GrokMediaEndpointVideoContent:
 		videoURL, err := xai.BuildVideoURLWithValidator(baseURL, requestID, validator)
 		if err != nil {
@@ -139,6 +141,23 @@ func buildGrokMediaURL(account *Account, cfg *config.Config, endpoint GrokMediaE
 	default:
 		return "", fmt.Errorf("unsupported grok media endpoint: %s", endpoint)
 	}
+}
+
+func buildGrokMediaLegacyVideoStatusURL(account *Account, cfg *config.Config, requestID string) (string, error) {
+	validator, err := grokBaseURLValidator(account, cfg)
+	if err != nil {
+		return "", err
+	}
+	baseURL := account.GetGrokMediaBaseURL()
+	genURL, err := xai.BuildVideosGenerationsURLWithValidator(baseURL, validator)
+	if err != nil {
+		return "", err
+	}
+	trimmedID := strings.Trim(strings.TrimSpace(requestID), "/")
+	if trimmedID == "" {
+		return "", fmt.Errorf("video request id is required")
+	}
+	return strings.TrimRight(genURL, "/") + "/" + url.PathEscape(trimmedID), nil
 }
 
 // buildGrokVoiceURL returns the official xAI Voice API endpoint.
