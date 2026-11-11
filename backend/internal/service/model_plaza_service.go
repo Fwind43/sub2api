@@ -239,7 +239,11 @@ func (s *ModelPlazaService) fillDisplayPricing(ctx context.Context, m *PlazaMode
 			return
 		}
 	}
-	if s.billingService != nil && s.resolver != nil {
+	hasGroupImageFallback := m.Pricing != nil &&
+		m.Pricing.BillingMode == BillingModeImage &&
+		g != nil &&
+		(g.ImagePrice1K != nil || g.ImagePrice2K != nil || g.ImagePrice4K != nil)
+	if !hasGroupImageFallback && s.billingService != nil && s.resolver != nil {
 		sched, err := s.billingService.ResolveContextPricingSchedule(ctx, s.resolver, ContextPricingScheduleInput{
 			Model:    m.Name,
 			Group:    g,
@@ -260,7 +264,11 @@ func (s *ModelPlazaService) fillDisplayPricing(ctx context.Context, m *PlazaMode
 // plazaPricingFromSchedule 把阶梯表压成展示用的 ChannelModelPricing：
 // 平价取首档单价，多档时 Intervals 逐档给出绝对单价；图片/按次字段沿用原始定价。
 func plazaPricingFromSchedule(raw *ChannelModelPricing, sched *ContextPricingSchedule) *ChannelModelPricing {
-	out := &ChannelModelPricing{BillingMode: BillingModeToken}
+	mode := BillingModeToken
+	if raw != nil && raw.BillingMode == BillingModeImage && raw.PerRequestPrice == nil {
+		mode = BillingModeImage
+	}
+	out := &ChannelModelPricing{BillingMode: mode}
 	if raw != nil {
 		out.ImageInputPrice = raw.ImageInputPrice
 		out.ImageOutputPrice = raw.ImageOutputPrice

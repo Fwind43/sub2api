@@ -41,7 +41,7 @@ func IsImageGenerationIntent(endpoint string, requestedModel string, body []byte
 	if IsImageGenerationEndpoint(endpoint) {
 		return true
 	}
-	if isOpenAIImageGenerationModel(requestedModel) {
+	if isOpenAIImageGenerationModel(requestedModel) || isMiniMaxCompatibleImageModel(requestedModel) {
 		return true
 	}
 	if len(body) == 0 || !gjson.ValidBytes(body) {
@@ -56,7 +56,8 @@ func IsImageGenerationIntent(endpoint string, requestedModel string, body []byte
 		case "model":
 			if !modelSeen {
 				modelSeen = true
-				imageIntent = isOpenAIImageGenerationModel(strings.TrimSpace(value.String()))
+				m := strings.TrimSpace(value.String())
+				imageIntent = isOpenAIImageGenerationModel(m) || isMiniMaxCompatibleImageModel(m)
 			}
 		case "tools":
 			if !toolsSeen {
@@ -169,13 +170,14 @@ func IsImageGenerationIntentMap(endpoint string, requestedModel string, reqBody 
 	if IsImageGenerationEndpoint(endpoint) {
 		return true
 	}
-	if isOpenAIImageGenerationModel(requestedModel) {
+	if isOpenAIImageGenerationModel(requestedModel) || isMiniMaxCompatibleImageModel(requestedModel) {
 		return true
 	}
 	if reqBody == nil {
 		return false
 	}
-	if isOpenAIImageGenerationModel(firstNonEmptyString(reqBody["model"])) {
+	bodyModel := firstNonEmptyString(reqBody["model"])
+	if isOpenAIImageGenerationModel(bodyModel) || isMiniMaxCompatibleImageModel(bodyModel) {
 		return true
 	}
 	if hasOpenAIImageGenerationTool(reqBody) {

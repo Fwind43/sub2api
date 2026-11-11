@@ -1752,6 +1752,9 @@ func grokMediaContentProxyURL(c *gin.Context, requestID string) string {
 
 func isMiniMaxVideoModel(model string) bool {
 	normalized := strings.ToLower(strings.TrimSpace(model))
+	if normalized == "minimax-h3-image" || strings.HasPrefix(normalized, "minimax-h3-image-") {
+		return false
+	}
 	return strings.HasPrefix(normalized, "minimax-h3") || strings.HasPrefix(normalized, "minimax-hailuo")
 }
 

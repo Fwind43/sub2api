@@ -21,7 +21,7 @@ import (
 
 func TestCompatibleImagesGeminiModels(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	for _, model := range []string{"gemini-2.5-flash-image", "gemini-2.5-flash-image-preview", "gemini-3-pro-image", "gemini-3.1-flash-image"} {
+	for _, model := range []string{"gemini-2.5-flash-image", "gemini-2.5-flash-image-preview", "gemini-3-pro-image", "gemini-3.1-flash-image", "MiniMax-H3-Image", "minimax-h3-image"} {
 		t.Run(model, func(t *testing.T) {
 			body := []byte(fmt.Sprintf(`{"model":%q,"prompt":"draw"}`, model))
 			c, _ := gin.CreateTestContext(httptest.NewRecorder())
@@ -35,7 +35,7 @@ func TestCompatibleImagesGeminiModels(t *testing.T) {
 			require.False(t, isOpenAIImageGenerationModel(model), "compatible image IDs must not enter native Responses normalization")
 		})
 	}
-	for _, model := range []string{"gemini-2.5-pro", "gemini-2.5-flash", "gemini-3-pro-imageless", "unknown-image", "gpt-5.5"} {
+	for _, model := range []string{"gemini-2.5-pro", "gemini-2.5-flash", "gemini-3-pro-imageless", "MiniMax-H3-Image-PE", "unknown-image", "gpt-5.5"} {
 		t.Run("reject_"+model, func(t *testing.T) {
 			body := []byte(fmt.Sprintf(`{"model":%q,"prompt":"draw"}`, model))
 			c, _ := gin.CreateTestContext(httptest.NewRecorder())

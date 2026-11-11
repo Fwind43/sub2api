@@ -589,8 +589,15 @@ func isGeminiCompatibleImageModel(model string) bool {
 		(strings.HasSuffix(model, "-image") || strings.Contains(model, "-image-"))
 }
 
+// isMiniMaxCompatibleImageModel recognizes MiniMax's OpenAI-compatible image
+// generation model (/v1/images/generations and /v1/images/edits, excluding the
+// MiniMax-H3-Image-PE chat prompt-enhancer model).
+func isMiniMaxCompatibleImageModel(model string) bool {
+	return strings.ToLower(strings.TrimSpace(model)) == "minimax-h3-image"
+}
+
 func validateCompatibleImagesModel(model string) error {
-	if isGeminiCompatibleImageModel(model) {
+	if isGeminiCompatibleImageModel(model) || isMiniMaxCompatibleImageModel(model) {
 		return nil
 	}
 	return validateOpenAIImagesModel(model)
@@ -599,7 +606,7 @@ func validateCompatibleImagesModel(model string) error {
 // RequiredCapabilityForModel also applies the API-key-only fence when channel
 // mapping introduces a compatible provider model after request parsing.
 func (req *OpenAIImagesRequest) RequiredCapabilityForModel(model string) OpenAIImagesCapability {
-	if isGeminiCompatibleImageModel(model) {
+	if isGeminiCompatibleImageModel(model) || isMiniMaxCompatibleImageModel(model) {
 		return OpenAIImagesCapabilityAPIKey
 	}
 	return req.RequiredCapability
@@ -621,7 +628,7 @@ func classifyOpenAIImagesCapability(req *OpenAIImagesRequest) OpenAIImagesCapabi
 	if req == nil {
 		return OpenAIImagesCapabilityNative
 	}
-	if isGeminiCompatibleImageModel(req.Model) {
+	if isGeminiCompatibleImageModel(req.Model) || isMiniMaxCompatibleImageModel(req.Model) {
 		return OpenAIImagesCapabilityAPIKey
 	}
 	if req.ExplicitModel || req.ExplicitSize {

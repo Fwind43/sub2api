@@ -124,8 +124,49 @@
               :scale="1"
             />
 
-            <PricingRow
+            <template
               v-if="
+                model.pricing.billing_mode === BILLING_MODE_IMAGE &&
+                model.pricing.per_request_price == null &&
+                (model.pricing.input_price != null || model.pricing.output_price != null)
+              "
+            >
+              <PricingRow
+                v-if="model.pricing.input_price != null"
+                :label="t(prefixKey('inputPrice'))"
+                :value="model.pricing.input_price"
+                :unit="t(prefixKey('unitPerMillion'))"
+                :scale="perMillionScale"
+              />
+              <PricingRow
+                v-if="model.pricing.output_price != null"
+                :label="t(prefixKey('outputPrice'))"
+                :value="model.pricing.output_price"
+                :unit="t(prefixKey('unitPerMillion'))"
+                :scale="perMillionScale"
+              />
+              <PricingRow
+                v-if="model.pricing.image_output_price != null && model.pricing.image_output_price > 0"
+                :label="t(prefixKey('imageOutputPrice'))"
+                :value="model.pricing.image_output_price"
+                :unit="t(prefixKey('unitPerMillion'))"
+                :scale="perMillionScale"
+              />
+            </template>
+
+            <PricingRow
+              v-else-if="
+                model.pricing.billing_mode === BILLING_MODE_IMAGE &&
+                model.pricing.per_request_price != null
+              "
+              :label="t(prefixKey('imageOutputPrice'))"
+              :value="model.pricing.per_request_price"
+              :unit="t(prefixKey('unitPerRequest'))"
+              :scale="1"
+            />
+
+            <PricingRow
+              v-else-if="
                 model.pricing.billing_mode === BILLING_MODE_IMAGE &&
                 model.pricing.image_output_price != null
               "
@@ -260,7 +301,10 @@ function formatInterval(iv: UserPricingInterval, pricing: UserSupportedModelPric
   if (pricing.billing_mode === BILLING_MODE_VIDEO) {
     return `${formatScaled(iv.per_request_price, 1)} ${t(prefixKey('unitPerSecond'))}`
   }
-  if (pricing.billing_mode === BILLING_MODE_PER_REQUEST || pricing.billing_mode === BILLING_MODE_IMAGE) {
+  if (
+    pricing.billing_mode === BILLING_MODE_PER_REQUEST ||
+    (pricing.billing_mode === BILLING_MODE_IMAGE && iv.per_request_price != null)
+  ) {
     return formatScaled(iv.per_request_price, 1)
   }
   const resolved = resolveIntervalPrices(iv, pricing)

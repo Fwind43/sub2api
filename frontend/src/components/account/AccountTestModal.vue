@@ -302,8 +302,8 @@ const supportsGeminiImageTest = computed(() => {
 })
 
 const supportsOpenAIImageTest = computed(() => {
-  const modelID = selectedModelId.value.toLowerCase()
-  if (!modelID.startsWith('gpt-image-')) return false
+  const modelID = selectedModelId.value.toLowerCase().trim()
+  if (!modelID.startsWith('gpt-image-') && modelID !== 'minimax-h3-image') return false
   return props.account?.platform === 'openai'
 })
 

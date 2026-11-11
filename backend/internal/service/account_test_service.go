@@ -166,9 +166,10 @@ const (
 	grokRealtimeProbeTimeout     = DefaultGrokRealtimeDialTimeout
 )
 
-// isOpenAIImageModel checks if the model is an OpenAI image generation model (e.g. gpt-image-2).
+// isOpenAIImageModel checks if the model is an OpenAI-compatible image generation model.
 func isOpenAIImageModel(model string) bool {
-	return strings.HasPrefix(strings.ToLower(model), "gpt-image-")
+	lower := strings.ToLower(strings.TrimSpace(model))
+	return strings.HasPrefix(lower, "gpt-image-") || isMiniMaxCompatibleImageModel(lower)
 }
 
 func isGrokVideoGenerationModel(model string) bool {
@@ -3197,10 +3198,11 @@ func (s *AccountTestService) testOpenAIImageAPIKey(c *gin.Context, ctx context.C
 		return s.sendErrorAndEnd(c, fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body)))
 	}
 
-	// Parse {"data": [{"b64_json": "...", "revised_prompt": "..."}]}
+	// Parse {"data": [{"b64_json": "...", "url": "...", "revised_prompt": "..."}]}
 	var result struct {
 		Data []struct {
 			B64JSON       string `json:"b64_json"`
+			URL           string `json:"url"`
 			RevisedPrompt string `json:"revised_prompt"`
 		} `json:"data"`
 	}
@@ -3220,6 +3222,12 @@ func (s *AccountTestService) testOpenAIImageAPIKey(c *gin.Context, ctx context.C
 			s.sendEvent(c, TestEvent{
 				Type:     "image",
 				ImageURL: "data:image/png;base64," + item.B64JSON,
+				MimeType: "image/png",
+			})
+		} else if strings.TrimSpace(item.URL) != "" {
+			s.sendEvent(c, TestEvent{
+				Type:     "image",
+				ImageURL: strings.TrimSpace(item.URL),
 				MimeType: "image/png",
 			})
 		}
