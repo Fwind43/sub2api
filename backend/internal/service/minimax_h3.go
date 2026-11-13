@@ -26,6 +26,10 @@ import (
 const H3Model = "MiniMax-H3"
 const OpenAIEndpointCapabilityMiniMaxH3 OpenAIEndpointCapability = "minimax_h3"
 const h3MaxVideo = 128 << 20
+const h3SubmissionTimeout = 30 * time.Minute
+
+// Exceeds the upstream deadline plus the bounded state-save window.
+const h3SubmissionLeaseSeconds = int((h3SubmissionTimeout + time.Minute) / time.Second)
 
 var ErrH3NotFound = errors.New("H3 task not found")
 var ErrH3Conflict = errors.New("idempotency key belongs to a different request")
@@ -70,19 +74,29 @@ type H3Service struct {
 	db      *sql.DB
 	gateway *OpenAIGatewayService
 	keys    *APIKeyService
+	ctx     context.Context
 	cancel  context.CancelFunc
 	wg      sync.WaitGroup
-	stop    sync.Once
+	mu      sync.Mutex // Serializes worker registration with Stop.
+	stopped bool
 }
 
 func NewH3Service(db *sql.DB, gateway *OpenAIGatewayService, keys *APIKeyService) *H3Service {
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &H3Service{db: db, gateway: gateway, keys: keys, cancel: cancel}
+	s := &H3Service{db: db, gateway: gateway, keys: keys, ctx: ctx, cancel: cancel}
 	s.wg.Add(1)
 	go func() { defer s.wg.Done(); s.run(ctx) }()
 	return s
 }
-func (s *H3Service) Stop() { s.stop.Do(s.cancel); s.wg.Wait() }
+func (s *H3Service) Stop() {
+	s.mu.Lock()
+	s.stopped = true
+	if s.cancel != nil {
+		s.cancel()
+	}
+	s.mu.Unlock()
+	s.wg.Wait()
+}
 
 // Only the exact video model is accepted; images have an independent endpoint.
 func ParseH3Request(body []byte) (H3Snapshot, error) {
@@ -221,9 +235,12 @@ func (s *H3Service) Create(ctx context.Context, key *APIKey, sub *UserSubscripti
 	if selected == nil || selected.Account == nil {
 		return nil, errors.New("no H3 account available")
 	}
-	if selected.ReleaseFunc != nil {
-		defer selected.ReleaseFunc()
-	}
+	release := selected.ReleaseFunc
+	defer func() {
+		if release != nil {
+			release()
+		}
+	}()
 	stage = "account_acquisition"
 	if !selected.Acquired {
 		return nil, errors.New("H3 account busy")
@@ -254,7 +271,7 @@ func (s *H3Service) Create(ctx context.Context, key *APIKey, sub *UserSubscripti
 	}
 	id := "h3-" + uuid.NewString()
 	stage = "task_insert"
-	res, err := s.db.ExecContext(ctx, `INSERT INTO minimax_h3_tasks(id,user_id,api_key_id,group_id,account_id,snapshot,idempotency_key,payload_hash,lease_until) VALUES($1,$2,$3,$4,$5,$6,$7,$8,now()+interval '3 minutes') ON CONFLICT(api_key_id,idempotency_key) DO NOTHING`, id, key.UserID, key.ID, *key.GroupID, account.ID, string(raw), idem, hash)
+	res, err := s.db.ExecContext(ctx, `INSERT INTO minimax_h3_tasks(id,user_id,api_key_id,group_id,account_id,snapshot,idempotency_key,payload_hash,lease_until) VALUES($1,$2,$3,$4,$5,$6,$7,$8,now()+$9*interval '1 second') ON CONFLICT(api_key_id,idempotency_key) DO NOTHING`, id, key.UserID, key.ID, *key.GroupID, account.ID, string(raw), idem, hash, h3SubmissionLeaseSeconds)
 	if err != nil {
 		return nil, err
 	}
@@ -271,29 +288,69 @@ func (s *H3Service) Create(ctx context.Context, key *APIKey, sub *UserSubscripti
 		}
 		return old, err
 	}
-	// Never retry this POST. A lost response is an ambiguous paid submission.
-	submitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 90*time.Second)
-	defer cancel()
-	response, submitErr := s.request(submitCtx, account, http.MethodPost, "/videos/generations", normalized, false)
-	upstream, state, billing := h3SubmissionOutcome(response, submitErr)
-	if state != "pending" {
-		// Never log upstream bodies, URLs, credentials, or arbitrary transport errors.
-		status := 0
-		var httpErr *h3UpstreamHTTPError
-		if errors.As(submitErr, &httpErr) {
-			status = httpErr.StatusCode
-		}
-		log.Printf("H3 submission task=%s state=%s upstream_http_status=%d", id, state, status)
+	// Transfer the account slot to the worker only after durable insertion.
+	// The HTTP request returns without waiting for GPU startup/rendering.
+	stage = "submission_start"
+	if !s.startSubmission(ctx, id, account, normalized, release) {
+		saveCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_, _ = s.db.ExecContext(saveCtx, "UPDATE minimax_h3_tasks SET generation='failed',billing='not_billable',lease_until=NULL,updated_at=now() WHERE id=$1 AND generation='submitting' AND upstream_id=''", id)
+		return nil, errors.New("H3 service is stopping; submission not sent")
 	}
+	release = nil
+	stage = "task_reload"
+	readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	return s.Get(readCtx, id, key)
+}
+
+// startSubmission registers before Stop can start waiting. Incoming request
+// cancellation must not lose a paid submission, but service shutdown cancels it.
+func (s *H3Service) startSubmission(ctx context.Context, id string, account *Account, body []byte, release func()) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stopped {
+		return false
+	}
+	submitCtx, cancel := context.WithTimeout(WithHTTPUpstreamProfile(context.WithoutCancel(ctx), HTTPUpstreamProfileLongVideo), h3SubmissionTimeout)
+	stopCancel := func() bool { return false }
+	if s.ctx != nil {
+		stopCancel = context.AfterFunc(s.ctx, cancel)
+	}
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		defer cancel()
+		defer stopCancel()
+		if release != nil {
+			defer release()
+		}
+		s.submit(submitCtx, id, account, body)
+	}()
+	return true
+}
+
+func (s *H3Service) submit(ctx context.Context, id string, account *Account, body []byte) {
+	// Never retry this POST. A lost response is an ambiguous paid submission.
+	response, submitErr := s.request(ctx, account, http.MethodPost, "/videos/generations", body, false)
+	upstream, state, billing := h3SubmissionOutcome(response, submitErr)
+	status := 0
+	var httpErr *h3UpstreamHTTPError
+	if errors.As(submitErr, &httpErr) {
+		status = httpErr.StatusCode
+	}
+	// Only fixed classifications are logged, never upstream bodies or errors.
+	log.Printf("H3 submission task=%s state=%s upstream_http_status=%d", id, state, status)
 	saveCtx, saveCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer saveCancel()
-	stage = "submission_state_save"
-	_, err = s.db.ExecContext(saveCtx, "UPDATE minimax_h3_tasks SET upstream_id=$2,generation=$3,billing=$4,lease_until=NULL,updated_at=now() WHERE id=$1", id, upstream, state, billing)
+	result, err := s.db.ExecContext(saveCtx, "UPDATE minimax_h3_tasks SET upstream_id=$2,generation=$3,billing=$4,lease_until=NULL,updated_at=now() WHERE id=$1 AND generation='submitting' AND upstream_id=''", id, upstream, state, billing)
 	if err != nil {
-		return nil, fmt.Errorf("H3 task %s requires reconciliation: %w", id, err)
+		log.Printf("H3 submission task=%s checkpoint_failed=true", id)
+		return
 	}
-	stage = "task_reload"
-	return s.Get(saveCtx, id, key)
+	if n, err := result.RowsAffected(); err != nil || n != 1 {
+		log.Printf("H3 submission task=%s checkpoint_conflict=true", id)
+	}
 }
 
 type h3UpstreamHTTPError struct {

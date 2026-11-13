@@ -6,8 +6,13 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
+
+	"github.com/DATA-DOG/go-sqlmock"
 )
 
 func TestH3RejectsNonVideoPayloads(t *testing.T) {
@@ -115,5 +120,108 @@ func TestH3UpstreamIDBoundary(t *testing.T) {
 	}
 	if !validH3UpstreamID("task-123") {
 		t.Fatal("rejected safe ID")
+	}
+}
+
+// Embedding satisfies the unused TLS method; only the dedicated H3 transport
+// is exercised, with no external network or paid generation.
+type h3BlockingTransport struct {
+	HTTPUpstream
+	entered chan *http.Request
+	finish  chan struct{}
+	calls   atomic.Int32
+}
+
+func (h *h3BlockingTransport) Do(r *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+	h.calls.Add(1)
+	h.entered <- r
+	select {
+	case <-h.finish:
+		return &http.Response{StatusCode: 202, Body: io.NopCloser(strings.NewReader(`{"request_id":"job-async"}`))}, nil
+	case <-r.Context().Done():
+		return nil, r.Context().Err()
+	}
+}
+func TestH3AsyncSubmissionLifecycle(t *testing.T) {
+	for _, shutdown := range []bool{false, true} {
+		name := "completion"
+		if shutdown {
+			name = "shutdown_unknown"
+		}
+		t.Run(name, func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			upstreamID, generation := "job-async", "pending"
+			if shutdown {
+				upstreamID, generation = "", "submission_unknown"
+			}
+			query := "UPDATE minimax_h3_tasks SET upstream_id=$2,generation=$3,billing=$4,lease_until=NULL,updated_at=now() WHERE id=$1 AND generation='submitting' AND upstream_id=''"
+			mock.ExpectExec(regexp.QuoteMeta(query)).WithArgs("h3-test", upstreamID, generation, "pending").WillReturnResult(sqlmock.NewResult(0, 1))
+			transport := &h3BlockingTransport{entered: make(chan *http.Request, 1), finish: make(chan struct{})}
+			lifeCtx, cancelLife := context.WithCancel(context.Background())
+			s := &H3Service{db: db, gateway: &OpenAIGatewayService{httpUpstream: transport}, ctx: lifeCtx, cancel: cancelLife}
+			defer s.Stop()
+			requestCtx, cancelRequest := context.WithCancel(context.Background())
+			defer cancelRequest()
+			var releases atomic.Int32
+			account := &Account{ID: 1, Credentials: map[string]any{"base_url": "https://example.org", "api_key": "test-secret"}}
+			started := make(chan bool, 1)
+			go func() {
+				started <- s.startSubmission(requestCtx, "h3-test", account, []byte(`{}`), func() { releases.Add(1) })
+			}()
+			select {
+			case ok := <-started:
+				if !ok {
+					t.Fatal("worker not started")
+				}
+			case <-time.After(time.Second):
+				t.Fatal("submission blocked HTTP return")
+			}
+			var req *http.Request
+			select {
+			case req = <-transport.entered:
+			case <-time.After(time.Second):
+				t.Fatal("worker did not send")
+			}
+			cancelRequest()
+			if req.Context().Err() != nil {
+				t.Fatal("incoming cancellation propagated")
+			}
+			if HTTPUpstreamProfileFromContext(req.Context()) != HTTPUpstreamProfileLongVideo {
+				t.Fatal("missing long-video transport profile")
+			}
+			deadline, ok := req.Context().Deadline()
+			if !ok || time.Until(deadline) < 29*time.Minute {
+				t.Fatal("short submission deadline")
+			}
+			if time.Duration(h3SubmissionLeaseSeconds)*time.Second <= h3SubmissionTimeout+10*time.Second {
+				t.Fatal("worker lease can expire before checkpoint")
+			}
+			if releases.Load() != 0 {
+				t.Fatal("account slot released while submitting")
+			}
+			if shutdown {
+				s.Stop()
+			} else {
+				close(transport.finish)
+				s.wg.Wait()
+			}
+			if releases.Load() != 1 || transport.calls.Load() != 1 {
+				t.Fatal("slot leak or repeated POST")
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
+			}
+			s.Stop()
+			if s.startSubmission(context.Background(), "h3-stopped", account, nil, nil) {
+				t.Fatal("accepted worker after Stop")
+			}
+			if transport.calls.Load() != 1 {
+				t.Fatal("shutdown caused another POST")
+			}
+		})
 	}
 }
