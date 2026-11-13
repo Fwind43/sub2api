@@ -4,24 +4,21 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	middleware "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
-	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
-// Exercise the handler's actual AsyncVideoStart callback, not just the Redis
-// claim helper: the old image-only gate claimed billing but never wrote usage.
-func TestGrokAsyncVideoCompletionRecordsAndBillsOnce(t *testing.T) {
+// H3 creation must never enter the legacy Grok async/billing path.
+// Legacy task polling and service-level billing remain covered separately.
+func TestGrokRejectsH3CreationWithoutUpstreamOrBilling(t *testing.T) {
 	for _, disconnect := range []bool{false, true} {
 		name := "connected"
 		if disconnect {
@@ -67,45 +64,19 @@ func TestGrokAsyncVideoCompletionRecordsAndBillsOnce(t *testing.T) {
 			price := 0.5
 			key.Group.VideoPrice480P = &price
 			h.GrokVideoGeneration(c)
-			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-			var pending struct {
-				RequestID string `json:"request_id"`
-			}
-			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &pending))
-			require.True(t, strings.HasPrefix(pending.RequestID, "mmh3-"), w.Body.String())
-			select {
-			case <-started:
-			case <-time.After(3 * time.Second):
-				t.Fatal("background POST did not start")
-			}
-			require.Empty(t, usage.created, "pending jobs must not bill")
+			require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+			require.Contains(t, w.Body.String(), "/v1/minimax/videos")
 			if disconnect {
 				cancel()
 			}
-			close(release)
-			var log *service.UsageLog
 			select {
-			case log = <-usage.created:
-			case <-time.After(5 * time.Second):
-				t.Fatal("completed video claimed billing without recording usage")
-			}
-			require.Equal(t, service.StableGrokVideoBillingRequestID(pending.RequestID), log.RequestID)
-			require.InDelta(t, 0.75, log.ActualCost, 0.000001)
-			billing.mu.Lock()
-			require.Len(t, billing.commands, 1)
-			require.InDelta(t, 0.75, billing.commands[0].BalanceCost, 0.000001)
-			billing.mu.Unlock()
-			// Repeated status observations use the same claim and cannot bill again.
-			for range 3 {
-				poll, out := grokMediaSlotContext(context.Background(), false)
-				poll.Params = gin.Params{{Key: "request_id", Value: pending.RequestID}}
-				poll.Set(string(middleware.ContextKeyAPIKey), key)
-				h.GrokVideoStatus(poll)
-				require.Equal(t, http.StatusOK, out.Code, out.Body.String())
+			case <-started:
+				t.Fatal("rejected H3 request reached the legacy upstream")
+			default:
 			}
 			require.Empty(t, usage.created)
 			billing.mu.Lock()
-			require.Len(t, billing.commands, 1)
+			require.Empty(t, billing.commands)
 			billing.mu.Unlock()
 		})
 	}

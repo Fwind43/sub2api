@@ -28,6 +28,7 @@ func TestOpenAIGatewayHandlerImages_DisabledGroupRejectsBeforeScheduling(t *test
 		GroupID: &groupID,
 		Group: &service.Group{
 			ID:                   groupID,
+			Platform:             service.PlatformOpenAI,
 			AllowImageGeneration: false,
 		},
 		User: &service.User{ID: 333},

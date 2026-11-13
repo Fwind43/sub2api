@@ -40,6 +40,16 @@ func (h *OpenAIGatewayHandler) MiniMaxH3Create(c *gin.Context) {
 		h.errorResponse(c, 400, "invalid_request_error", "MiniMax target group required")
 		return
 	}
+	if !service.GroupAllowsImageGeneration(key.Group) {
+		h.errorResponse(c, http.StatusForbidden, "permission_error", service.ImageGenerationPermissionMessage())
+		return
+	}
+	reqLog := requestLogger(c, "handler.minimax_h3")
+	decision := h.checkSecurityAudit(c, reqLog, key, subject, service.ContentModerationProtocolOpenAIImages, service.H3Model, body)
+	if decision != nil && !decision.AllowNextStage {
+		h.openAISecurityAuditError(c, decision)
+		return
+	}
 	sub, _ := middleware.GetSubscriptionFromContext(c)
 	stream := false
 	release, acquired := h.acquireResponsesUserSlot(c, subject.UserID, subject.Concurrency, false, &stream, requestLogger(c, "handler.minimax_h3"))

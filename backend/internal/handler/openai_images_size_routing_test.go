@@ -64,7 +64,7 @@ func serveOpenAIImagesSizeRoutingRequest(handler *OpenAIGatewayHandler, groupID 
 	c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{
 		ID:      99,
 		GroupID: &groupID,
-		Group:   &service.Group{ID: groupID, AllowImageGeneration: true},
+		Group:   &service.Group{ID: groupID, Platform: service.PlatformOpenAI, AllowImageGeneration: true},
 		User:    &service.User{ID: 100},
 	})
 	c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: 100, Concurrency: 0})

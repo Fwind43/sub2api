@@ -170,6 +170,7 @@ func TestOpenAIGatewayHandlerImages_ServerErrorFailsOverAndReturnsClearErrorWhen
 		GroupID: &groupID,
 		Group: &service.Group{
 			ID:                   groupID,
+			Platform:             service.PlatformOpenAI,
 			AllowImageGeneration: true,
 		},
 		User: &service.User{ID: 100},
