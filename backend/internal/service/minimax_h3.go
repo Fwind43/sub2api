@@ -104,7 +104,7 @@ func ParseH3Request(body []byte) (H3Snapshot, error) {
 	if v.Resolution == "" {
 		v.Resolution = "720p"
 	}
-	if v.Resolution != "720p" && v.Resolution != "1080p" && v.Resolution != "480p" {
+	if v.Resolution != "720p" && v.Resolution != "1080p" && v.Resolution != "480p" && v.Resolution != "768p" {
 		return H3Snapshot{}, errors.New("unsupported resolution")
 	}
 	return H3Snapshot{Resolution: v.Resolution, Seconds: v.Duration, PricingAt: time.Now().UTC()}, nil

@@ -15,6 +15,10 @@ func TestH3RequestContract(t *testing.T) {
 	if err != nil || s.Seconds != 6 || s.Resolution != "720p" {
 		t.Fatalf("invalid defaults: %+v %v", s, err)
 	}
+	preserved, err := ParseH3Request([]byte(`{"model":"MiniMax-H3","prompt":"waves","duration":6,"resolution":"768p"}`))
+	if err != nil || preserved.Resolution != "768p" {
+		t.Fatalf("768p was not preserved: %+v %v", preserved, err)
+	}
 	for _, body := range []string{
 		`{"model":"grok-video","prompt":"waves"}`,
 		`{"model":"MiniMax-H3","prompt":"waves","duration":16}`,
