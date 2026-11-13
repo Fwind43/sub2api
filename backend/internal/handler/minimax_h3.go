@@ -27,9 +27,15 @@ func (h *OpenAIGatewayHandler) MiniMaxH3Create(c *gin.Context) {
 		h.errorResponse(c, 401, "authentication_error", "User context missing")
 		return
 	}
-	body, err := io.ReadAll(io.LimitReader(c.Request.Body, (2<<20)+1))
-	if err != nil || len(body) > 2<<20 {
-		h.errorResponse(c, 400, "invalid_request_error", "Invalid or oversized H3 JSON")
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, service.H3MaxRequestBytes)
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			h.errorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", fmt.Sprintf("H3 JSON exceeds request body limit (%d bytes)", tooLarge.Limit))
+		} else {
+			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Unable to read H3 JSON")
+		}
 		return
 	}
 	if _, err = service.ParseH3Request(body); err != nil {

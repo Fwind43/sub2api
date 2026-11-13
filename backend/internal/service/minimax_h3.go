@@ -98,8 +98,27 @@ func (s *H3Service) Stop() {
 	s.wg.Wait()
 }
 
-// Only the exact video model is accepted; images have an independent endpoint.
+// ParseH3Request validates both the frozen billing inputs and GeToken's native
+// reference contract before account selection or any upstream submission.
 func ParseH3Request(body []byte) (H3Snapshot, error) {
+	snapshot, _, err := parseH3Request(body)
+	return snapshot, err
+}
+
+func parseH3Request(body []byte) (H3Snapshot, string, error) {
+	if len(body) > H3MaxRequestBytes {
+		return H3Snapshot{}, "", errors.New("H3 JSON must be at most 12 MiB")
+	}
+	snapshot, err := parseH3Snapshot(body)
+	if err != nil {
+		return H3Snapshot{}, "", err
+	}
+	task, err := validateH3References(body)
+	return snapshot, task, err
+}
+
+// Only the exact video model is accepted; images have an independent endpoint.
+func parseH3Snapshot(body []byte) (H3Snapshot, error) {
 	var v struct {
 		Model      string `json:"model"`
 		Prompt     string `json:"prompt"`
@@ -138,7 +157,7 @@ func ParseH3Request(body []byte) (H3Snapshot, error) {
 // prepareH3Request translates gateway compatibility fields without changing the
 // original body used for idempotency. H3 always creates one video and rejects n.
 func prepareH3Request(body []byte) (H3Snapshot, []byte, error) {
-	snap, err := ParseH3Request(body)
+	snap, task, err := parseH3Request(body)
 	if err != nil {
 		return H3Snapshot{}, nil, err
 	}
@@ -148,6 +167,7 @@ func prepareH3Request(body []byte) (H3Snapshot, []byte, error) {
 	}
 	payload["duration"], _ = json.Marshal(snap.Seconds)
 	payload["resolution"], _ = json.Marshal(snap.Resolution)
+	payload["task"], _ = json.Marshal(task)
 	delete(payload, "seconds")
 	delete(payload, "n")
 	normalized, err := json.Marshal(payload)

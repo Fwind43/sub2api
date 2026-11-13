@@ -192,6 +192,14 @@ func RegisterGatewayRoutes(
 	// API网关（Claude API兼容）
 	gateway := r.Group("/v1")
 	gateway.Use(bodyLimit)
+	// Bound H3 uploads before allowlist/composite middleware can preread them.
+	// The outer configured limit still wins if an operator set a smaller cap.
+	gateway.Use(func(c *gin.Context) {
+		if c.Request.Method == http.MethodPost && c.FullPath() == "/v1/minimax/videos" {
+			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, service.H3MaxRequestBytes)
+		}
+		c.Next()
+	})
 	gateway.Use(clientRequestID)
 	gateway.Use(opsErrorLogger)
 	gateway.Use(endpointNorm)
