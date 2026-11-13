@@ -39,6 +39,59 @@ func TestFilterSchedulerCredentialsKeepsGeminiExplicitCacheKeys(t *testing.T) {
 	require.NotContains(t, filtered, "service_account_json")
 }
 
+func TestSchedulerMetadataAccountKeepsMiniMaxH3Capability(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		platform       string
+		accountType    string
+		mode           string
+		wantH3         bool
+		wantCapability bool
+	}{
+		{name: "h3", platform: service.PlatformMiniMax, accountType: service.AccountTypeAPIKey, mode: "h3", wantH3: true, wantCapability: true},
+		{name: "normalized_h3", platform: service.PlatformMiniMax, accountType: service.AccountTypeAPIKey, mode: " H3 ", wantH3: true, wantCapability: true},
+		{name: "text", platform: service.PlatformMiniMax, accountType: service.AccountTypeAPIKey, mode: "text"},
+		{name: "missing_mode", platform: service.PlatformMiniMax, accountType: service.AccountTypeAPIKey},
+		{name: "other_platform", platform: service.PlatformOpenAI, accountType: service.AccountTypeAPIKey, mode: "h3"},
+		{name: "oauth", platform: service.PlatformMiniMax, accountType: service.AccountTypeOAuth, mode: "h3", wantH3: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			credentials := map[string]any{
+				"api_key":       "test-api-key",
+				"base_url":      "https://h3.example.invalid",
+				"access_token":  "drop-access-token",
+				"refresh_token": "drop-refresh-token",
+			}
+			if tc.mode != "" {
+				credentials["account_mode"] = tc.mode
+			}
+			account := service.Account{
+				ID:          1772,
+				Platform:    tc.platform,
+				Type:        tc.accountType,
+				Credentials: credentials,
+			}
+			require.Equal(t, tc.wantH3, account.IsMiniMaxH3())
+			require.Equal(t, tc.wantCapability, account.SupportsOpenAIEndpointCapability(service.OpenAIEndpointCapabilityMiniMaxH3))
+
+			// Exercise the same metadata serialization used by sched:meta writes.
+			_, payload, err := marshalSchedulerCacheAccount(account)
+			require.NoError(t, err)
+			var metadata service.Account
+			require.NoError(t, json.Unmarshal([]byte(payload), &metadata))
+
+			require.Equal(t, tc.mode, metadata.GetCredential("account_mode"))
+			if tc.mode == "" {
+				require.NotContains(t, metadata.Credentials, "account_mode")
+			}
+			require.Equal(t, tc.wantH3, metadata.IsMiniMaxH3())
+			require.Equal(t, tc.wantCapability, metadata.SupportsOpenAIEndpointCapability(service.OpenAIEndpointCapabilityMiniMaxH3))
+			require.NotContains(t, metadata.Credentials, "access_token")
+			require.NotContains(t, metadata.Credentials, "refresh_token")
+		})
+	}
+}
+
 func TestSchedulerMetadataAccountKeepsOpenAISubscriptionIdentity(t *testing.T) {
 	account := service.Account{
 		ID:       24,
