@@ -30,6 +30,17 @@ const h3MaxVideo = 128 << 20
 var ErrH3NotFound = errors.New("H3 task not found")
 var ErrH3Conflict = errors.New("idempotency key belongs to a different request")
 
+// H3CreateError identifies the failed lifecycle stage without exposing request
+// bodies, credentials, upstream URLs, or database error messages in logs.
+// Error and Unwrap preserve the original error and errors.Is/errors.As behavior.
+type H3CreateError struct {
+	Stage string
+	cause error
+}
+
+func (e *H3CreateError) Error() string { return e.cause.Error() }
+func (e *H3CreateError) Unwrap() error { return e.cause }
+
 type H3Snapshot struct {
 	Cost                  *CostBreakdown    `json:"cost"`
 	Multiplier            float64           `json:"multiplier"`
@@ -135,15 +146,23 @@ func (s *H3Service) Get(ctx context.Context, id string, key *APIKey) (*H3Task, e
 	}
 	return scanH3(s.db.QueryRowContext(ctx, "SELECT "+h3Columns+" FROM minimax_h3_tasks WHERE id=$1 AND user_id=$2 AND api_key_id=$3 AND group_id=$4", id, key.UserID, key.ID, *key.GroupID))
 }
-func (s *H3Service) Create(ctx context.Context, key *APIKey, sub *UserSubscription, body []byte, idem string) (*H3Task, error) {
+func (s *H3Service) Create(ctx context.Context, key *APIKey, sub *UserSubscription, body []byte, idem string) (task *H3Task, createErr error) {
+	stage := "dependencies"
+	defer func() {
+		if createErr != nil {
+			createErr = &H3CreateError{Stage: stage, cause: createErr}
+		}
+	}()
 	if s.db == nil || s.gateway == nil || s.gateway.usageBillingRepo == nil || s.keys == nil ||
 		s.gateway.cfg == nil || s.gateway.cfg.RunMode == config.RunModeSimple {
 		return nil, errors.New("H3 requires durable billing and storage before submission")
 	}
+	stage = "request_validation"
 	snap, err := ParseH3Request(body)
 	if err != nil {
 		return nil, err
 	}
+	stage = "group_validation"
 	if key == nil || key.GroupID == nil || key.Group == nil {
 		return nil, errors.New("a MiniMax group is required")
 	}
@@ -154,6 +173,7 @@ func (s *H3Service) Create(ctx context.Context, key *APIKey, sub *UserSubscripti
 	if platform != PlatformMiniMax {
 		return nil, errors.New("a MiniMax target group is required")
 	}
+	stage = "idempotency_validation"
 	if len(idem) > 200 {
 		return nil, errors.New("idempotency key too long")
 	}
@@ -162,6 +182,7 @@ func (s *H3Service) Create(ctx context.Context, key *APIKey, sub *UserSubscripti
 	}
 	sum := sha256.Sum256(body)
 	hash := hex.EncodeToString(sum[:])
+	stage = "idempotency_lookup"
 	old, err := scanH3(s.db.QueryRowContext(ctx, "SELECT "+h3Columns+" FROM minimax_h3_tasks WHERE api_key_id=$1 AND idempotency_key=$2", key.ID, idem))
 	if err == nil {
 		if old.hash != hash || old.UserID != key.UserID || old.GroupID != *key.GroupID {
@@ -172,26 +193,32 @@ func (s *H3Service) Create(ctx context.Context, key *APIKey, sub *UserSubscripti
 	if !errors.Is(err, ErrH3NotFound) {
 		return nil, err
 	}
+	stage = "account_selection"
 	selected, _, err := s.gateway.SelectAccountWithSchedulerForCapability(ctx, key.GroupID, "", "", H3Model, nil, OpenAIUpstreamTransportHTTPSSE, OpenAIEndpointCapabilityMiniMaxH3, false, false, false, PlatformMiniMax)
 	if err != nil {
 		return nil, err
 	}
+	stage = "account_availability"
 	if selected == nil || selected.Account == nil {
 		return nil, errors.New("no H3 account available")
 	}
 	if selected.ReleaseFunc != nil {
 		defer selected.ReleaseFunc()
 	}
+	stage = "account_acquisition"
 	if !selected.Acquired {
 		return nil, errors.New("H3 account busy")
 	}
 	account := selected.Account
+	stage = "account_capability"
 	if !account.SupportsOpenAIEndpointCapability(OpenAIEndpointCapabilityMiniMaxH3) {
 		return nil, errors.New("H3 scheduler capability mismatch")
 	}
+	stage = "endpoint_validation"
 	if _, err = s.request(ctx, account, http.MethodGet, "", nil, true); err != nil {
 		return nil, err
 	}
+	stage = "pricing"
 	baseMultiplier := s.gateway.ResolveUserGroupRateMultiplier(ctx, key.UserID, *key.GroupID, key.Group.RateMultiplier)
 	snap.Multiplier = resolveVideoRateMultiplier(key, baseMultiplier)
 	snap.AccountRateMultiplier = account.BillingRateMultiplier()
@@ -201,20 +228,24 @@ func (s *H3Service) Create(ctx context.Context, key *APIKey, sub *UserSubscripti
 	}
 	snap.Group = key.Group
 	snap.Subscription = sub
+	stage = "snapshot_serialization"
 	raw, err := json.Marshal(snap)
 	if err != nil {
 		return nil, err
 	}
 	id := "h3-" + uuid.NewString()
+	stage = "task_insert"
 	res, err := s.db.ExecContext(ctx, `INSERT INTO minimax_h3_tasks(id,user_id,api_key_id,group_id,account_id,snapshot,idempotency_key,payload_hash,lease_until) VALUES($1,$2,$3,$4,$5,$6,$7,$8,now()+interval '3 minutes') ON CONFLICT(api_key_id,idempotency_key) DO NOTHING`, id, key.UserID, key.ID, *key.GroupID, account.ID, string(raw), idem, hash)
 	if err != nil {
 		return nil, err
 	}
+	stage = "task_insert_result"
 	n, err := res.RowsAffected()
 	if err != nil {
 		return nil, err
 	}
 	if n == 0 {
+		stage = "idempotency_reload"
 		old, err = scanH3(s.db.QueryRowContext(ctx, "SELECT "+h3Columns+" FROM minimax_h3_tasks WHERE api_key_id=$1 AND idempotency_key=$2", key.ID, idem))
 		if err == nil && (old.hash != hash || old.GroupID != *key.GroupID || old.UserID != key.UserID) {
 			return nil, ErrH3Conflict
@@ -252,10 +283,12 @@ func (s *H3Service) Create(ctx context.Context, key *APIKey, sub *UserSubscripti
 	}
 	saveCtx, saveCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer saveCancel()
+	stage = "submission_state_save"
 	_, err = s.db.ExecContext(saveCtx, "UPDATE minimax_h3_tasks SET upstream_id=$2,generation=$3,lease_until=NULL,updated_at=now() WHERE id=$1", id, upstream, state)
 	if err != nil {
 		return nil, fmt.Errorf("H3 task %s requires reconciliation: %w", id, err)
 	}
+	stage = "task_reload"
 	return s.Get(saveCtx, id, key)
 }
 func validH3UpstreamID(id string) bool {

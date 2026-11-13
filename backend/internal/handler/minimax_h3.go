@@ -2,12 +2,14 @@ package handler
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 
 	middleware "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 )
 
 func (h *OpenAIGatewayHandler) MiniMaxH3Create(c *gin.Context) {
@@ -70,6 +72,22 @@ func (h *OpenAIGatewayHandler) MiniMaxH3Create(c *gin.Context) {
 		return
 	}
 	if err != nil {
+		stage, cause := "unknown", err
+		var createErr *service.H3CreateError
+		if errors.As(err, &createErr) {
+			stage, cause = createErr.Stage, createErr.Unwrap()
+		}
+		// Log only controlled metadata: raw errors can contain credentials,
+		// request bodies, upstream URLs, or database values.
+		fields := []zap.Field{
+			zap.String("stage", stage),
+			zap.String("cause_type", fmt.Sprintf("%T", cause)),
+		}
+		var sqlStateErr interface{ SQLState() string }
+		if errors.As(cause, &sqlStateErr) {
+			fields = append(fields, zap.String("sql_state", sqlStateErr.SQLState()))
+		}
+		reqLog.Error("minimax_h3.create_failed", fields...)
 		h.errorResponse(c, 502, "h3_error", "H3 submission failed; retry only with the same Idempotency-Key")
 		return
 	}
