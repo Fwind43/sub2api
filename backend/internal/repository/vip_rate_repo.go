@@ -9,6 +9,44 @@ import (
 )
 
 var _ service.VIPRateStore = (*userGroupRateRepository)(nil)
+var _ service.EffectiveUserGroupRateReader = (*userGroupRateRepository)(nil)
+
+// GetEffectiveByUserID 读取用户端展示用的倍率覆盖值：用户专属 > VIP。
+// 单次查询保持同一快照；NULL（例如仅设置 RPM）不覆盖 VIP，零倍率仍有效。
+// 不填充分组默认倍率，以保留前端的默认/分时倍率展示行为。
+func (r *userGroupRateRepository) GetEffectiveByUserID(ctx context.Context, userID int64) (map[int64]float64, error) {
+	rows, err := r.sql.QueryContext(ctx, `
+		SELECT group_id, rate_multiplier
+		FROM user_group_rate_multipliers
+		WHERE user_id = $1 AND rate_multiplier IS NOT NULL
+		UNION ALL
+		SELECT gv.group_id, gv.rate_multiplier
+		FROM group_vip_rates gv
+		JOIN vip_users vu ON vu.user_id = $1
+		WHERE NOT EXISTS (
+			SELECT 1 FROM user_group_rate_multipliers ugr
+			WHERE ugr.user_id = $1 AND ugr.group_id = gv.group_id
+				AND ugr.rate_multiplier IS NOT NULL
+		)`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	rates := make(map[int64]float64)
+	for rows.Next() {
+		var groupID int64
+		var rate float64
+		if err := rows.Scan(&groupID, &rate); err != nil {
+			return nil, err
+		}
+		rates[groupID] = rate
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return rates, nil
+}
 
 func (r *userGroupRateRepository) ListVIPUsers(ctx context.Context) ([]service.VIPUser, error) {
 	rows, err := r.sql.QueryContext(ctx, `SELECT v.user_id, COALESCE(u.email,''), COALESCE(u.username,''), v.notes, v.created_at

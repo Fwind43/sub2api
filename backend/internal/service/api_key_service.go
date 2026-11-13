@@ -1125,13 +1125,20 @@ func (s *APIKeyService) GetUserGroupVisibility(ctx context.Context, userID int64
 	return allowed, user.RestrictPublicGroups, nil
 }
 
-// GetUserGroupRates 获取用户的专属分组倍率配置
-// 返回 map[groupID]rateMultiplier
+// GetUserGroupRates 获取用户端展示用的有效分组倍率覆盖值。
+// 用户专属倍率 > VIP 倍率；未返回的分组继续使用默认倍率。
 func (s *APIKeyService) GetUserGroupRates(ctx context.Context, userID int64) (map[int64]float64, error) {
 	if s.userGroupRateRepo == nil {
 		return nil, nil
 	}
-	rates, err := s.userGroupRateRepo.GetByUserID(ctx, userID)
+	var rates map[int64]float64
+	var err error
+	if reader, ok := s.userGroupRateRepo.(EffectiveUserGroupRateReader); ok {
+		rates, err = reader.GetEffectiveByUserID(ctx, userID)
+	} else {
+		// 兼容不支持 VIP 的仓储；后台编辑接口仍只读取手动配置。
+		rates, err = s.userGroupRateRepo.GetByUserID(ctx, userID)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("get user group rates: %w", err)
 	}

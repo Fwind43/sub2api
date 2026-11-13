@@ -27,6 +27,13 @@ type GroupRPMOverrideInput struct {
 	RPMOverride *int  `json:"rpm_override"`
 }
 
+// EffectiveUserGroupRateReader 批量读取用户端展示用的有效倍率覆盖值。
+// 用户专属倍率优先于 VIP；未返回的分组由调用方使用分组默认倍率。
+// 与后台编辑用的 GetByUserID 分离，避免将继承的 VIP 价视为手动配置。
+type EffectiveUserGroupRateReader interface {
+	GetEffectiveByUserID(ctx context.Context, userID int64) (map[int64]float64, error)
+}
+
 // UserGroupRateRepository 用户专属分组倍率/RPM 仓储接口。
 // 允许管理员为特定用户设置分组的专属计费倍率与 RPM 上限，覆盖分组默认值。
 type UserGroupRateRepository interface {

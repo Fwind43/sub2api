@@ -339,7 +339,7 @@ func (h *APIKeyHandler) GetAvailableGroups(c *gin.Context) {
 	response.Success(c, out)
 }
 
-// GetUserGroupRates 获取当前用户的专属分组倍率配置
+// GetUserGroupRates 获取当前用户的有效分组倍率覆盖值（用户专属优先，其次 VIP）
 // GET /api/v1/groups/rates
 func (h *APIKeyHandler) GetUserGroupRates(c *gin.Context) {
 	subject, ok := middleware2.GetAuthSubjectFromContext(c)
