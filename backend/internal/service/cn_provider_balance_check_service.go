@@ -243,8 +243,7 @@ func (s *CNProviderBalanceCheckService) collectAccountProbeTargets() []accountPr
 		platform  string
 		supported func(*Account) bool
 		check     accountProbeCheck
-	}{
-	} {
+	}{} {
 		accounts, err := s.accountRepo.ListByPlatform(context.Background(), p.platform)
 		if err != nil {
 			log.Printf("[CNBalance] list %s accounts failed: %v", p.platform, err)

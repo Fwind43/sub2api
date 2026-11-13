@@ -29,10 +29,10 @@ type iqTestQuestionRequest struct {
 }
 
 type createIQTestBankRequest struct {
-	Name        string                   `json:"name" binding:"required"`
-	Description string                   `json:"description"`
-	Enabled     *bool                    `json:"enabled"`
-	Questions   []iqTestQuestionRequest  `json:"questions"`
+	Name        string                  `json:"name" binding:"required"`
+	Description string                  `json:"description"`
+	Enabled     *bool                   `json:"enabled"`
+	Questions   []iqTestQuestionRequest `json:"questions"`
 }
 
 type updateIQTestBankRequest struct {
@@ -216,10 +216,10 @@ func (h *IQTestHandler) CreatePlan(c *gin.Context) {
 		return
 	}
 	plan := &service.IQTestPlan{
-		BankID:         req.BankID,
-		QuestionID:     req.QuestionID,
-		AccountID:      req.AccountID,
-		ModelID:        req.ModelID,
+		BankID:          req.BankID,
+		QuestionID:      req.QuestionID,
+		AccountID:       req.AccountID,
+		ModelID:         req.ModelID,
 		CronExpression:  req.CronExpression,
 		Enabled:         true,
 		MaxResults:      req.MaxResults,

@@ -125,8 +125,8 @@ type ModelPricing struct {
 	// DeepSeek 官方价强制覆盖与官方峰谷叠加，让运营者配置真正生效。
 	GlobalCustomPricing bool
 	// GlobalTimePricing 全局统一价条目自带的时间段（峰谷）倍率配置。
-	GlobalTimePricing *ChannelTimePricing
-	CacheCreation12hPricePerToken      *float64           // OpenAI 12h writes; nil preserves the generic price on existing operator cards.
+	GlobalTimePricing             *ChannelTimePricing
+	CacheCreation12hPricePerToken *float64 // OpenAI 12h writes; nil preserves the generic price on existing operator cards.
 }
 
 func normalizeBillingServiceTier(serviceTier string) string {
