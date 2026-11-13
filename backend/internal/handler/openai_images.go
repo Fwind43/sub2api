@@ -80,8 +80,14 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 	if resolvedModel, ok := service.ResolvedUpstreamModelFromContext(c.Request.Context()); ok {
 		routingModel = resolvedModel
 	}
-	if !compositeTargetPlatformAllowed(c, apiKey, requestModel, service.PlatformOpenAI) {
+	if !compositeTargetPlatformAllowed(c, apiKey, requestModel, service.PlatformOpenAI, service.PlatformMiniMax) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Model is not supported by this OpenAI-compatible endpoint for composite groups")
+		return
+	}
+
+	imagePlatform := effectiveAPIKeyPlatform(c, apiKey)
+	if imagePlatform != service.PlatformOpenAI && imagePlatform != service.PlatformMiniMax {
+		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Platform does not support this images endpoint")
 		return
 	}
 
@@ -171,13 +177,14 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 
 	for {
 		reqLog.Debug("openai.images.account_selecting", zap.Int("excluded_account_count", len(failedAccountIDs)))
-		selection, scheduleDecision, err := h.gatewayService.SelectAccountWithSchedulerForImages(
+		selection, scheduleDecision, err := h.gatewayService.SelectAccountWithSchedulerForImagesPlatform(
 			requestCtx,
 			apiKey.GroupID,
 			sessionHash,
 			routingModel,
 			failedAccountIDs,
 			parsed.RequiredCapabilityForModel(channelMapping.MappedModel),
+			imagePlatform,
 		)
 		if err != nil {
 			if failoverClientGone(c) {
@@ -189,12 +196,14 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 				zap.Int("excluded_account_count", len(failedAccountIDs)),
 			)
 			if len(failedAccountIDs) == 0 {
-				if tier, unsupported := h.gatewayService.OpenAIImageSizeTierUnsupported(c.Request.Context(), apiKey.GroupID, routingModel, parsed.Size, "", parsed.RequiredCapabilityForModel(channelMapping.MappedModel)); unsupported {
-					service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalModelConfiguration)
-					h.handleStreamingAwareError(c, http.StatusBadRequest, "invalid_request_error", service.OpenAIImageSizeTierUnsupportedMessage(parsed.Size, tier), streamStarted)
-					return
+				if imagePlatform == service.PlatformOpenAI {
+					if tier, unsupported := h.gatewayService.OpenAIImageSizeTierUnsupported(c.Request.Context(), apiKey.GroupID, routingModel, parsed.Size, "", parsed.RequiredCapabilityForModel(channelMapping.MappedModel)); unsupported {
+						service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalModelConfiguration)
+						h.handleStreamingAwareError(c, http.StatusBadRequest, "invalid_request_error", service.OpenAIImageSizeTierUnsupportedMessage(parsed.Size, tier), streamStarted)
+						return
+					}
 				}
-				cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, clientRequestModel, routingModel, service.PlatformOpenAI)
+				cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, clientRequestModel, routingModel, imagePlatform)
 				if !cls.ModelNotFound {
 					markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
 				}
@@ -213,7 +222,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 			return
 		}
 		if selection == nil || selection.Account == nil {
-			cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, clientRequestModel, routingModel, service.PlatformOpenAI)
+			cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, clientRequestModel, routingModel, imagePlatform)
 			if !cls.ModelNotFound {
 				markOpsRoutingCapacityLimited(c)
 			}

@@ -1923,6 +1923,14 @@ func (a *Account) SupportsOpenAIEndpointCapability(capability OpenAIEndpointCapa
 	if a == nil {
 		return false
 	}
+	if capability == OpenAIEndpointCapabilityMiniMaxH3 {
+		return a.IsMiniMaxH3() && a.Type == AccountTypeAPIKey &&
+			strings.TrimSpace(a.GetCredential("base_url")) != "" &&
+			strings.TrimSpace(a.GetCredential("api_key")) != ""
+	}
+	if a.IsMiniMaxH3() && capability != "" {
+		return false
+	}
 	if capability == OpenAIEndpointCapabilitySeedance {
 		configured, _ := a.openAIEndpointCapabilitySet()
 		return configured["seedance"] && a.Platform == PlatformOpenAI && a.Type == AccountTypeAPIKey &&
@@ -2107,9 +2115,22 @@ func (a *Account) openAIEndpointCapabilitySet() (map[string]bool, bool) {
 	return result, true
 }
 
+// IsMiniMaxH3 separates media credentials from existing MiniMax text accounts.
+func (a *Account) IsMiniMaxH3() bool {
+	return a != nil && a.Platform == PlatformMiniMax &&
+		strings.EqualFold(strings.TrimSpace(a.GetCredential("account_mode")), "h3")
+}
+
 func (a *Account) SupportsOpenAIImageCapability(capability OpenAIImagesCapability) bool {
+	if a == nil {
+		return false
+	}
 	if capability == "" {
 		return true
+	}
+	if a.Platform == PlatformMiniMax {
+		return a.IsMiniMaxH3() && capability == OpenAIImagesCapabilityAPIKey && a.Type == AccountTypeAPIKey &&
+			strings.TrimSpace(a.GetCredential("base_url")) != ""
 	}
 	if !a.IsOpenAI() {
 		return false

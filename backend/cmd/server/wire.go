@@ -82,6 +82,7 @@ func providePluginHostInfo(buildInfo handler.BuildInfo) service.PluginHostInfo {
 }
 
 func provideCleanup(
+	h3 *service.H3Service,
 	entClient *ent.Client,
 	rdb *redis.Client,
 	opsMetricsCollector *service.OpsMetricsCollector,
@@ -465,6 +466,9 @@ func provideCleanup(
 			}
 		}
 
+		if h3 != nil {
+			h3.Stop()
+		}
 		runParallel(parallelSteps)
 		runSequential(infraSteps)
 

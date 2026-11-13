@@ -692,6 +692,9 @@ func validateDataAccount(item DataAccount) error {
 	if len(item.Credentials) == 0 {
 		return errors.New("account credentials is required")
 	}
+	if item.Platform == service.PlatformMiniMax && item.Type != service.AccountTypeAPIKey {
+		return errors.New("minimax accounts only support apikey credentials")
+	}
 	switch item.Type {
 	case service.AccountTypeOAuth, service.AccountTypeSetupToken, service.AccountTypeAPIKey, service.AccountTypeUpstream:
 	default:

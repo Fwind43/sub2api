@@ -90,6 +90,10 @@ func RegisterGatewayRoutes(
 		}
 	}
 	videoGenerationHandler := func(c *gin.Context) {
+		if getGroupPlatform(c) == "minimax" {
+			h.OpenAIGateway.MiniMaxH3Create(c)
+			return
+		}
 		// Video status/content lookups below already allow Composite groups; keep
 		// task creation aligned so composite keys that route to Grok accounts can
 		// submit video generation jobs.
@@ -106,6 +110,11 @@ func RegisterGatewayRoutes(
 		})
 	}
 	videoStatusHandler := func(c *gin.Context) {
+		// Dedicated task IDs carry their backend identity; GETs have no model.
+		if strings.HasPrefix(c.Param("request_id"), "h3-") {
+			h.OpenAIGateway.MiniMaxH3Status(c)
+			return
+		}
 		// Video status requests do not carry a model, so composite groups cannot
 		// be resolved by compositeTargetPlatformMiddleware. Route them through
 		// the Grok handler and let scheduler/account selection enforce capacity.
@@ -122,6 +131,10 @@ func RegisterGatewayRoutes(
 		})
 	}
 	videoContentHandler := func(c *gin.Context) {
+		if strings.HasPrefix(c.Param("request_id"), "h3-") {
+			h.OpenAIGateway.MiniMaxH3Content(c)
+			return
+		}
 		// Video content requests do not carry a model, so composite groups cannot
 		// be resolved by compositeTargetPlatformMiddleware. Route them through
 		// the Grok handler just like video status lookups.
@@ -267,6 +280,9 @@ func RegisterGatewayRoutes(
 		gateway.DELETE("/images/batches/:id/outputs", h.BatchImage.DeleteOutputs)
 		// OpenAI-compatible clients may create through /videos; xAI receives the
 		// canonical /videos/generations route inside the Grok media forwarder.
+		gateway.POST("/minimax/videos", h.OpenAIGateway.MiniMaxH3Create)
+		gateway.GET("/minimax/videos/:request_id", h.OpenAIGateway.MiniMaxH3Status)
+		gateway.GET("/minimax/videos/:request_id/content", h.OpenAIGateway.MiniMaxH3Content)
 		gateway.POST("/videos", videoGenerationHandler)
 		gateway.POST("/videos/generations", videoGenerationHandler)
 		gateway.POST("/videos/edits", videoEditHandler)

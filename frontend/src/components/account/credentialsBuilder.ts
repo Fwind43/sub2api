@@ -304,6 +304,8 @@ export function providerHasModelCatalog(platform: string): boolean {
 /** 接入模式的展示名；未知模式原样显示。 */
 export function providerModeLabel(mode: string, t: (key: string) => string): string {
   switch (mode) {
+    case 'h3':
+      return 'MiniMax H3 (Video / Image)'
     case 'payg':
       return t('admin.accounts.cnProviders.accountMode.payg')
     case 'coding':
@@ -324,6 +326,7 @@ export function providerAccountModes(platform: string): string[] {
 
 /** 规范化接入模式：不在该供应商模式列表中的值回落默认模式。 */
 export function resolveProviderAccountMode(platform: string, value: unknown): string {
+  if (platform === 'minimax' && value === 'h3') return 'h3'
   const profile = getProviderProfile(platform)
   if (!profile) return typeof value === 'string' ? value : ''
   if (typeof value === 'string' && profile.modes.some(item => item.mode === value)) return value

@@ -21,19 +21,23 @@ import (
 
 // OpenAIRecordUsageInput input for recording usage
 type OpenAIRecordUsageInput struct {
-	Result             *OpenAIForwardResult
-	APIKey             *APIKey
-	User               *User
-	Account            *Account
-	Subscription       *UserSubscription
-	InboundEndpoint    string
-	UpstreamEndpoint   string
-	UserAgent          string // 请求的 User-Agent
-	IPAddress          string // 请求的客户端 IP 地址
-	SessionID          string // 客户端显式会话标识（session_id / X-Session-Id 等请求头），仅用于用量行会话关联
-	RequestPayloadHash string
-	APIKeyService      APIKeyQuotaUpdater
-	QuotaPlatform      string // user×platform quota platform resolved by the handler before async billing.
+	// Internal H3 durable create-time quote, never populated from HTTP input.
+	h3Cost                  *CostBreakdown
+	h3Multiplier            float64
+	h3AccountRateMultiplier float64
+	Result                  *OpenAIForwardResult
+	APIKey                  *APIKey
+	User                    *User
+	Account                 *Account
+	Subscription            *UserSubscription
+	InboundEndpoint         string
+	UpstreamEndpoint        string
+	UserAgent               string // 请求的 User-Agent
+	IPAddress               string // 请求的客户端 IP 地址
+	SessionID               string // 客户端显式会话标识（session_id / X-Session-Id 等请求头），仅用于用量行会话关联
+	RequestPayloadHash      string
+	APIKeyService           APIKeyQuotaUpdater
+	QuotaPlatform           string // user×platform quota platform resolved by the handler before async billing.
 	// PricingAt 是请求级定价时刻（请求开始捕获，与利润门的 D 同源）：高峰因子
 	// 按该时刻计算，保证同一请求从准入到扣费不中途变价。零值回退记录时刻
 	//（既有行为），供未装配的路径（图片/异步/cyber 等）沿用。
@@ -160,6 +164,13 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	if result == nil {
 		return errors.New("openai usage result is nil")
 	}
+	if input.h3Cost != nil && (s.usageBillingRepo == nil || input.APIKey == nil || input.User == nil || input.Account == nil ||
+		input.APIKey.UserID != input.User.ID || input.Account.Platform != PlatformMiniMax || result.VideoCount != 1 ||
+		!strings.HasPrefix(result.ResponseID, "h3-") || result.RequestID != "minimax-h3:"+result.ResponseID ||
+		s.cfg == nil || s.cfg.RunMode == config.RunModeSimple) {
+		// Durable H3 settlement must never fall back to legacy non-idempotent billing.
+		return errors.New("H3 durable billing dependencies or identity unavailable")
+	}
 	if s.rateLimitService != nil && input.Account != nil && input.Account.Platform == PlatformOpenAI {
 		s.rateLimitService.ResetOpenAI403Counter(ctx, input.Account.ID)
 	}
@@ -240,21 +251,27 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	}
 	longContextBillingGate := openAILongContextBillingGate(billingAccount)
 	modelLongContextExempt := openAISubscriptionLongContextExempt(billingAccount, result)
-	cost, err = s.calculateOpenAIRecordUsageCost(
-		ctx,
-		result,
-		apiKey,
-		billingModels,
-		multiplier,
-		imageMultiplier,
-		videoMultiplier,
-		baseMultiplier,
-		tokens,
-		serviceTier,
-		longContextBillingGate,
-		modelLongContextExempt,
-		pricingAt,
-	)
+	if input.h3Cost != nil {
+		frozen := *input.h3Cost
+		cost = &frozen
+		videoMultiplier = input.h3Multiplier
+	} else {
+		cost, err = s.calculateOpenAIRecordUsageCost(
+			ctx,
+			result,
+			apiKey,
+			billingModels,
+			multiplier,
+			imageMultiplier,
+			videoMultiplier,
+			baseMultiplier,
+			tokens,
+			serviceTier,
+			longContextBillingGate,
+			modelLongContextExempt,
+			pricingAt,
+		)
+	}
 	if err != nil {
 		if !isUsagePricingUnavailableError(err) {
 			return err
@@ -340,6 +357,9 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	// Create usage log
 	durationMs := int(result.Duration.Milliseconds())
 	accountRateMultiplier := account.BillingRateMultiplier()
+	if input.h3Cost != nil {
+		accountRateMultiplier = input.h3AccountRateMultiplier
+	}
 	requestID := resolveUsageBillingRequestID(ctx, result.RequestID)
 	if result.OpenAIWSMode {
 		if upstreamRequestID := strings.TrimSpace(result.RequestID); upstreamRequestID != "" {
@@ -349,7 +369,9 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	// Async Grok video: always use the stable task id for dedup (status + content polls
 	// share one bill). Context-local client/local IDs would otherwise create a new row
 	// per poll if Redis claim is lost.
-	if result.VideoCount > 0 {
+	if input.h3Cost != nil {
+		requestID = "minimax-h3:" + result.ResponseID
+	} else if result.VideoCount > 0 {
 		if stable := StableGrokVideoBillingRequestID(firstNonEmpty(
 			strings.TrimPrefix(strings.TrimSpace(result.RequestID), "grok-video:"),
 			strings.TrimSpace(result.ResponseID),
@@ -415,7 +437,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		ImageSizeBreakdown:       imageSizeBreakdown,
 		NativeCompactionV2:       input.NativeCompactionV2,
 	}
-	isVideoUsage := isGrokVideoUsageResult(result, billingModels)
+	isVideoUsage := input.h3Cost != nil || isGrokVideoUsageResult(result, billingModels)
 	if isVideoUsage {
 		usageLog.VideoCount = result.VideoCount
 		usageLog.VideoResolution = optionalTrimmedStringPtr(NormalizeVideoBillingResolutionOrDefault(result.VideoResolution))

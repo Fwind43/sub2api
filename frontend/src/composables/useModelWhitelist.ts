@@ -252,6 +252,8 @@ const doubaoModels = [
 
 // MiniMax
 const minimaxModels = [
+  'MiniMax-H3',
+  'MiniMax-H3-Image',
   'MiniMax-M3',
   'MiniMax-M2.7',
   'MiniMax-M2.7-highspeed',

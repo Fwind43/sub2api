@@ -634,6 +634,10 @@
         </div>
       </div>
 
+      <div v-if="form.platform === 'minimax'" class="mt-4">
+        <button type="button" class="btn btn-secondary" :aria-pressed="isMiniMaxH3" @click="accountMode = 'h3'">MiniMax H3 (Video / Image)</button>
+        <p v-if="isMiniMaxH3" class="input-hint">MiniMax-H3 / MiniMax-H3-Image. API key and custom base URL required. No OAuth or text endpoints.</p>
+      </div>
       <!-- Account Mode Selection (Kimi / Zhipu / DeepSeek) -->
       <div v-if="isCNPlatform && !isOpenCodeGoPlatform">
         <label class="input-label">{{ t('admin.accounts.cnProviders.accountMode.title') }}</label>
@@ -695,7 +699,7 @@
       </div>
 
       <!-- API Protocol Selection (Kimi / Zhipu / DeepSeek / OpenCode) -->
-      <div v-if="isMultiProtocolPlatform" class="mt-4">
+      <div v-if="isMultiProtocolPlatform && !isMiniMaxH3" class="mt-4">
         <label class="input-label">{{ t('admin.accounts.cnProviders.apiProtocol.title') }}</label>
         <div class="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-3">
           <button
@@ -1478,7 +1482,7 @@
             {{ t('admin.accounts.gatewayPreset.hint') }}
           </p>
         </div>
-        <div v-if="!isMultiProtocolPlatform || apiProtocol !== 'adaptive'">
+        <div v-if="isMiniMaxH3 || !isMultiProtocolPlatform || apiProtocol !== 'adaptive'">
           <label class="input-label">{{ t('admin.accounts.baseUrl') }}</label>
           <input
             v-model="apiKeyBaseUrl"
@@ -1493,7 +1497,7 @@
             @select="apiKeyBaseUrl = $event"
           />
           <CnBaseUrlPresets
-            v-if="isCNPlatform && !isOpenCodeGoPlatform"
+            v-if="isCNPlatform && !isOpenCodeGoPlatform && !isMiniMaxH3"
             class="mt-2"
             :platform="cnPresetPlatform"
             :mode="cnPresetMode"
@@ -4192,6 +4196,7 @@ const apiKeyHint = computed(() => {
 
 // Base URL / API Key 占位符：国产供应商随账号类型变化。
 const apiKeyBaseUrlPlaceholder = computed(() => {
+  if (isMiniMaxH3.value) return 'https://your-minimax-h3-gateway.example'
   if (isMultiProtocolPlatform.value) {
     const mode = form.platform === 'opencode_go' ? openCodeAccountMode.value : accountMode.value
     return defaultCNBaseUrl(form.platform, mode, apiProtocol.value) || 'https://api.example.com'
@@ -4335,6 +4340,7 @@ const upstreamBillingAutoProbeEnabled = ref(true)
 // ── 国产供应商（Kimi / Zhipu / DeepSeek）账号类型、API 协议与端点 ──
 // 多协议供应商（国产厂商与走通用表单的供应商）的接入模式；OpenCode 用 openCodeAccountMode。
 const accountMode = ref<string>('payg')
+const isMiniMaxH3 = computed(() => form.platform === 'minimax' && accountMode.value === 'h3')
 const openCodeAccountMode = ref<OpenCodeAccountMode>('zen')
 // API 协议决定转发端点与格式：cc=现有转换链，anthropic=原生直通（Claude Code），
 // responses=deepseek / kimi 原生 Responses 端点（Codex）。与账号类型正交。
@@ -4443,8 +4449,8 @@ function selectCNPlatform(platform: CnProviderPlatform) {
   accountCategory.value = 'apikey'
   apiProtocol.value = 'adaptive'
   // deepseek 无 coding 套餐（profile 仅 payg）；从其他供应商切换来的未知模式回落默认模式。
-  accountMode.value = resolveProviderAccountMode(platform, accountMode.value)
-  apiKeyBaseUrl.value = defaultCNBaseUrl(platform, accountMode.value, apiProtocol.value)
+  accountMode.value = platform === 'minimax' ? 'h3' : resolveProviderAccountMode(platform, accountMode.value)
+  apiKeyBaseUrl.value = platform === 'minimax' ? '' : defaultCNBaseUrl(platform, accountMode.value, apiProtocol.value)
   resetAdaptiveBaseUrls(platform, accountMode.value)
 }
 function selectCommandCodePlatform() {
@@ -4511,6 +4517,10 @@ watch(openCodeAccountMode, (mode, previousMode) => {
 })
 watch(accountMode, (mode, previousMode) => {
   if (!isMultiProtocolPlatform.value || isOpenCodeGoPlatform.value) return
+  if (isMiniMaxH3.value) {
+    apiKeyBaseUrl.value = ''
+    return
+  }
   if (routesByModel.value) {
     const previousRules = JSON.stringify(defaultProviderProtocolRules(form.platform, previousMode))
     if (JSON.stringify(openCodeGoProtocolRules.value) === previousRules) {
@@ -6098,7 +6108,13 @@ const handleSubmit = async () => {
   // 国产供应商：账号模式 + 协议 + 对应端点写入凭据；后端按 account_mode 路由
   // 额度/余额探测，按 api_protocol 路由转发端点与格式。注意 CN apikey 走本函数
   // 的通用路径（直接 doCreateAccount），不经过 createAccountAndFinish。
-  if (isMultiProtocolApiKeyPlatform(form.platform)) {
+  if (isMiniMaxH3.value) {
+    if (!apiKeyBaseUrl.value.trim()) {
+      appStore.showError('MiniMax H3 requires a custom base URL')
+      return
+    }
+    credentials.account_mode = 'h3'
+  } else if (isMultiProtocolApiKeyPlatform(form.platform)) {
     credentials.account_mode = form.platform === 'opencode_go' ? openCodeAccountMode.value : accountMode.value
     credentials.api_protocol = apiProtocol.value
     if (apiProtocol.value === 'adaptive') {
@@ -6184,7 +6200,7 @@ const handleSubmit = async () => {
     ...form,
     group_ids: form.group_ids,
     extra: withUpstreamRequestIdHeader(extra),
-    upstream_billing_probe_enabled: upstreamBillingAutoProbeEnabled.value,
+    upstream_billing_probe_enabled: !isMiniMaxH3.value && upstreamBillingAutoProbeEnabled.value,
     auto_pause_on_expired: autoPauseOnExpired.value
   })
 }

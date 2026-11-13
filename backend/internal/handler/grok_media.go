@@ -109,6 +109,10 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 		return
 	}
 	requestInfo := service.ParseGrokMediaRequest(contentType, body)
+	if endpoint.IsGenerationRequest() && service.IsMiniMaxVideoModel(requestInfo.Model) {
+		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Use a dedicated MiniMax group and /v1/minimax/videos for H3")
+		return
+	}
 	if endpoint == service.SeedanceEndpointCreate {
 		requestInfo, err = service.ParseSeedanceRequest(body)
 		if err != nil {

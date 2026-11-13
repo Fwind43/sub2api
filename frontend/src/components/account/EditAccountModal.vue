@@ -34,7 +34,7 @@
         >
           {{ t('admin.accounts.gatewayPreset.hint') }}
         </p>
-        <div v-if="!isCNApiKeyAccount || editApiProtocol !== 'adaptive'">
+        <div v-if="isMiniMaxH3 || !isCNApiKeyAccount || editApiProtocol !== 'adaptive'">
           <label class="input-label">{{ t('admin.accounts.baseUrl') }}</label>
           <input
             v-model="editBaseUrl"
@@ -59,7 +59,7 @@
             @select="editBaseUrl = $event"
           />
           <CnBaseUrlPresets
-            v-if="isCNApiKeyAccount && isCNProviderPlatform(account.platform)"
+            v-if="isCNApiKeyAccount && isCNProviderPlatform(account.platform) && !isMiniMaxH3"
             class="mt-2"
             :platform="cnPresetPlatform"
             :mode="cnPresetMode"
@@ -154,6 +154,10 @@
             </button>
           </div>
         </div>
+        <div v-if="account.platform === 'minimax' && account.type === 'apikey'">
+          <button type="button" class="btn btn-secondary" :aria-pressed="isMiniMaxH3" @click="editAccountMode = 'h3'">MiniMax H3 (Video / Image)</button>
+          <p v-if="isMiniMaxH3" class="input-hint">MiniMax-H3 / MiniMax-H3-Image. Custom base URL required. No OAuth or text endpoints.</p>
+        </div>
         <!-- Account Mode Selection (CN providers) -->
         <div v-if="isCNApiKeyAccount && isCNProviderPlatform(account.platform)">
           <label class="input-label">{{ t('admin.accounts.cnProviders.accountMode.title') }}</label>
@@ -173,10 +177,10 @@
               {{ t(`admin.accounts.cnProviders.accountMode.${opt.labelKey}`) }}
             </button>
           </div>
-          <p class="input-hint">{{ t(`admin.accounts.cnProviders.accountMode.${editAccountMode}Desc`) }}</p>
+          <p v-if="!isMiniMaxH3" class="input-hint">{{ t(`admin.accounts.cnProviders.accountMode.${editAccountMode}Desc`) }}</p>
         </div>
         <!-- API Protocol Selection (CN providers / OpenCode) -->
-        <div v-if="isCNApiKeyAccount">
+        <div v-if="isCNApiKeyAccount && !isMiniMaxH3">
           <label class="input-label">{{ t('admin.accounts.cnProviders.apiProtocol.title') }}</label>
           <div class="mt-2 flex flex-wrap gap-2">
             <button
@@ -3706,6 +3710,7 @@ const editApiProtocol = ref<CnApiProtocol>('adaptive')
 const editOpenCodeGoProtocolRules = ref<OpenCodeGoProtocolRule[]>(cloneOpenCodeGoProtocolRules())
 // 多协议供应商（国产厂商与走通用表单的供应商）的接入模式；OpenCode 用 editOpenCodeAccountMode。
 const editAccountMode = ref<string>('payg')
+const isMiniMaxH3 = computed(() => props.account?.platform === 'minimax' && editAccountMode.value === 'h3')
 const editOpenCodeAccountMode = ref<OpenCodeAccountMode>('go')
 // 国产厂商的接入模式只有 payg / coding。
 const cnPresetMode = computed<CnAccountMode>(() => (editAccountMode.value === 'coding' ? 'coding' : 'payg'))
@@ -3775,7 +3780,7 @@ watch(editApiProtocol, (protocol, previousProtocol) => {
 })
 watch(editAccountMode, (mode, previousMode) => {
   if (!isCNApiKeyAccount.value || syncingForm.value) return
-  if (props.account?.platform === 'opencode_go') return
+  if (props.account?.platform === 'opencode_go' || isMiniMaxH3.value) return
   // 供应商没有的接入模式（如 deepseek 无 coding 套餐）防御性回退默认模式（UI 已隐藏该选项）。
   const effectiveMode = resolveProviderAccountMode(props.account!.platform, mode)
   if (effectiveMode !== mode) {
@@ -4885,7 +4890,8 @@ const syncFormFromAccount = (newAccount: Account | null) => {
       if (newAccount.platform === 'opencode_go') {
         editOpenCodeAccountMode.value = resolveOpenCodeAccountMode(credentials.account_mode)
       } else if (isCNProviderPlatform(newAccount.platform)) {
-        editAccountMode.value = credentials.account_mode === 'coding' ? 'coding' : 'payg'
+        editAccountMode.value = newAccount.platform === 'minimax' && credentials.account_mode === 'h3'
+          ? 'h3' : credentials.account_mode === 'coding' ? 'coding' : 'payg'
       } else {
         editAccountMode.value = resolveProviderAccountMode(newAccount.platform, credentials.account_mode)
       }
@@ -4954,7 +4960,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
             : isMultiProtocolApiKeyPlatform(newAccount.platform)
               ? defaultCNBaseUrl(newAccount.platform, currentOpenCodeOrCNMode(), editApiProtocol.value)
               : 'https://api.anthropic.com'
-    editBaseUrl.value = isCNApiKeyAccount.value && editApiProtocol.value === 'adaptive'
+    editBaseUrl.value = !isMiniMaxH3.value && isCNApiKeyAccount.value && editApiProtocol.value === 'adaptive'
       ? editAdaptiveBaseUrls.value.chat_completions
       : (credentials.base_url as string) || platformDefaultUrl
 
@@ -5691,7 +5697,7 @@ const handleSubmit = async () => {
     }
     updatePayload.auto_pause_on_expired = autoPauseOnExpired.value
     if (props.account.type === 'apikey') {
-      updatePayload.upstream_billing_probe_enabled = upstreamBillingAutoProbeEnabled.value
+      updatePayload.upstream_billing_probe_enabled = !isMiniMaxH3.value && upstreamBillingAutoProbeEnabled.value
       updatePayload.upstream_billing_rate_sync_enabled = upstreamBillingRateSyncEnabled.value
       if (upstreamBillingRateSyncEnabled.value) {
         delete updatePayload.rate_multiplier
@@ -5713,7 +5719,15 @@ const handleSubmit = async () => {
       }
 
       // 国产供应商：模式与协议写入凭据（决定额度/余额探测与转发端点/格式）。
-      if (isCNApiKeyAccount.value) {
+      if (isMiniMaxH3.value) {
+        if (!editBaseUrl.value.trim()) {
+          appStore.showError('MiniMax H3 requires a custom base URL')
+          return
+        }
+        newCredentials.account_mode = 'h3'
+        delete newCredentials.api_protocol
+        delete newCredentials.api_base_urls
+      } else if (isCNApiKeyAccount.value) {
         newCredentials.account_mode = currentOpenCodeOrCNMode()
         newCredentials.api_protocol = editApiProtocol.value
         if (editApiProtocol.value === 'adaptive') {
