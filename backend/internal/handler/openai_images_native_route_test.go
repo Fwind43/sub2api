@@ -90,7 +90,7 @@ func newNativeImageRoute(t *testing.T, delay time.Duration, status int) (*httpte
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
 		groupID := int64(1)
-		c.Set(string(middleware.ContextKeyAPIKey), &service.APIKey{ID: 1, GroupID: &groupID, Group: &service.Group{ID: 1, AllowImageGeneration: true}, User: &service.User{ID: 1}})
+		c.Set(string(middleware.ContextKeyAPIKey), &service.APIKey{ID: 1, GroupID: &groupID, Group: &service.Group{ID: 1, Platform: service.PlatformOpenAI, AllowImageGeneration: true}, User: &service.User{ID: 1}})
 		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 1})
 	})
 	router.POST("/v1/images/generations", handler.Images)
