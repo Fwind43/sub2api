@@ -288,7 +288,7 @@ func TestGrokMediaSignedVideoContentURLRejectsDeceptiveOrigins(t *testing.T) {
 
 func TestGrokMediaSignedVideoContentURLRejectsDifferentRelayTask(t *testing.T) {
 	_, err := grokMediaSignedVideoContentURL(
-		[]byte(`{"video":{"url":"/v1/videos/task-2/content"}}`),
+		[]byte(`{"video":{"url":"https://relay.example/v1/videos/task-2/content"}}`),
 		"task-1",
 	)
 
