@@ -10,6 +10,13 @@ import (
 	"golang.org/x/sync/singleflight"
 )
 
+// userGroupRateCacheVersionProvider is optional so repositories without local
+// invalidation retain TTL-only caching. Both gateways share the production repo.
+// Versions are process-local; other application instances still use their TTL.
+type userGroupRateCacheVersionProvider interface {
+	UserGroupRateCacheVersion(userID, groupID int64) uint64
+}
+
 type userGroupRateResolver struct {
 	repo         UserGroupRateRepository
 	cache        *gocache.Cache
@@ -47,6 +54,14 @@ func (r *userGroupRateResolver) Resolve(ctx context.Context, userID, groupID int
 	}
 
 	key := fmt.Sprintf("%d:%d", userID, groupID)
+	if versions, ok := r.repo.(userGroupRateCacheVersionProvider); ok {
+		if version := versions.UserGroupRateCacheVersion(userID, groupID); version != 0 {
+			key = fmt.Sprintf("%s:v%d", key, version)
+		}
+	}
+	// Version both the cache and singleflight key: a post-save request must not
+	// join an older in-flight query. Older queries may only populate their old
+	// namespace, which is unreachable by new requests and expires with the TTL.
 	if r.cache != nil {
 		if cached, ok := r.cache.Get(key); ok {
 			if multiplier, castOK := cached.(float64); castOK {

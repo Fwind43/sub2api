@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"sync"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -11,6 +12,49 @@ import (
 
 type userGroupRateRepository struct {
 	sql sqlExecutor
+
+	// Shared by the admin service and both gateway resolvers in this process.
+	rateVersionMu sync.RWMutex
+	rateVersion   uint64
+	userVersions  map[int64]uint64
+	groupVersions map[int64]uint64
+}
+
+// UserGroupRateCacheVersion changes only for affected users/groups after a
+// successful VIP write. The global sequence makes max(user, group) monotonic.
+func (r *userGroupRateRepository) UserGroupRateCacheVersion(userID, groupID int64) uint64 {
+	r.rateVersionMu.RLock()
+	defer r.rateVersionMu.RUnlock()
+	version := r.userVersions[userID]
+	if groupVersion := r.groupVersions[groupID]; groupVersion > version {
+		version = groupVersion
+	}
+	return version
+}
+
+func (r *userGroupRateRepository) invalidateVIPUsers(userIDs []int64) {
+	if len(userIDs) == 0 {
+		return
+	}
+	r.rateVersionMu.Lock()
+	defer r.rateVersionMu.Unlock()
+	r.rateVersion++
+	if r.userVersions == nil {
+		r.userVersions = make(map[int64]uint64)
+	}
+	for _, userID := range userIDs {
+		r.userVersions[userID] = r.rateVersion
+	}
+}
+
+func (r *userGroupRateRepository) invalidateGroupVIPRate(groupID int64) {
+	r.rateVersionMu.Lock()
+	defer r.rateVersionMu.Unlock()
+	r.rateVersion++
+	if r.groupVersions == nil {
+		r.groupVersions = make(map[int64]uint64)
+	}
+	r.groupVersions[groupID] = r.rateVersion
 }
 
 // NewUserGroupRateRepository 创建用户专属分组倍率/RPM 仓储

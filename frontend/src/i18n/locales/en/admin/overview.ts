@@ -1026,7 +1026,7 @@ export default {
       noRateMultipliers: 'No user rate multipliers configured',
       vip: {
         title: 'VIP pricing',
-        hint: 'The VIP list is shared across groups; listed users are billed at the VIP rate in this group. Priority: per-user rate > VIP rate > group rate. Changes may take a short while to apply due to caching.',
+        hint: 'The VIP list is shared across groups; listed users are billed at the VIP rate in this group. Priority: per-user rate > VIP rate > group rate. VIP changes apply to new requests immediately after saving.',
         rate: 'VIP rate',
         ratePlaceholder: 'Empty = disabled',
         clear: 'Clear',

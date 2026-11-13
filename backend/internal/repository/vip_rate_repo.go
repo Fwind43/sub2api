@@ -38,6 +38,7 @@ func (r *userGroupRateRepository) AddVIPUsers(ctx context.Context, userIDs []int
 	if err != nil {
 		return 0, err
 	}
+	r.invalidateVIPUsers(userIDs)
 	n, _ := res.RowsAffected()
 	return int(n), nil
 }
@@ -50,6 +51,7 @@ func (r *userGroupRateRepository) RemoveVIPUsers(ctx context.Context, userIDs []
 	if err != nil {
 		return 0, err
 	}
+	r.invalidateVIPUsers(userIDs)
 	n, _ := res.RowsAffected()
 	return int(n), nil
 }
@@ -70,10 +72,18 @@ func (r *userGroupRateRepository) GetGroupVIPRate(ctx context.Context, groupID i
 func (r *userGroupRateRepository) SetGroupVIPRate(ctx context.Context, groupID int64, rate float64) error {
 	_, err := r.sql.ExecContext(ctx, `INSERT INTO group_vip_rates (group_id, rate_multiplier, updated_at)
 		VALUES ($1, $2, NOW()) ON CONFLICT (group_id) DO UPDATE SET rate_multiplier = EXCLUDED.rate_multiplier, updated_at = NOW()`, groupID, rate)
-	return err
+	if err != nil {
+		return err
+	}
+	r.invalidateGroupVIPRate(groupID)
+	return nil
 }
 
 func (r *userGroupRateRepository) ClearGroupVIPRate(ctx context.Context, groupID int64) error {
 	_, err := r.sql.ExecContext(ctx, `DELETE FROM group_vip_rates WHERE group_id = $1`, groupID)
-	return err
+	if err != nil {
+		return err
+	}
+	r.invalidateGroupVIPRate(groupID)
+	return nil
 }

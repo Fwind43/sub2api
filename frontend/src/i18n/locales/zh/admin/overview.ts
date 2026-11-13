@@ -1045,7 +1045,7 @@ export default {
       noRateMultipliers: '暂无用户设置了专属倍率',
       vip: {
         title: 'VIP 专属价格',
-        hint: 'VIP 名单全局共用；名单内用户在本分组按 VIP 倍率计费。优先级：用户专属倍率 > VIP 倍率 > 分组倍率。修改后因缓存最多延迟片刻生效。',
+        hint: 'VIP 名单全局共用；名单内用户在本分组按 VIP 倍率计费。优先级：用户专属倍率 > VIP 倍率 > 分组倍率。VIP 设置保存成功后，对新请求立即生效。',
         rate: 'VIP 倍率',
         ratePlaceholder: '留空=不启用',
         clear: '清除',
