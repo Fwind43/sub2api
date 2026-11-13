@@ -121,6 +121,25 @@ func ParseH3Request(body []byte) (H3Snapshot, error) {
 	return H3Snapshot{Resolution: v.Resolution, Seconds: v.Duration, PricingAt: time.Now().UTC()}, nil
 }
 
+// prepareH3Request translates gateway compatibility fields without changing the
+// original body used for idempotency. H3 always creates one video and rejects n.
+func prepareH3Request(body []byte) (H3Snapshot, []byte, error) {
+	snap, err := ParseH3Request(body)
+	if err != nil {
+		return H3Snapshot{}, nil, err
+	}
+	var payload map[string]json.RawMessage
+	if err = json.Unmarshal(body, &payload); err != nil {
+		return H3Snapshot{}, nil, err
+	}
+	payload["duration"], _ = json.Marshal(snap.Seconds)
+	payload["resolution"], _ = json.Marshal(snap.Resolution)
+	delete(payload, "seconds")
+	delete(payload, "n")
+	normalized, err := json.Marshal(payload)
+	return snap, normalized, err
+}
+
 const h3Columns = "id,user_id,api_key_id,group_id,account_id,upstream_id,generation,delivery,billing,snapshot,created_at,lease_token,payload_hash"
 
 type h3Scanner interface{ Scan(...any) error }
@@ -158,7 +177,7 @@ func (s *H3Service) Create(ctx context.Context, key *APIKey, sub *UserSubscripti
 		return nil, errors.New("H3 requires durable billing and storage before submission")
 	}
 	stage = "request_validation"
-	snap, err := ParseH3Request(body)
+	snap, normalized, err := prepareH3Request(body)
 	if err != nil {
 		return nil, err
 	}
@@ -255,42 +274,65 @@ func (s *H3Service) Create(ctx context.Context, key *APIKey, sub *UserSubscripti
 	// Never retry this POST. A lost response is an ambiguous paid submission.
 	submitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 90*time.Second)
 	defer cancel()
-	var payload map[string]any
-	_ = json.Unmarshal(body, &payload)
-	payload["duration"] = snap.Seconds
-	payload["resolution"] = snap.Resolution
-	delete(payload, "seconds")
-	normalized, _ := json.Marshal(payload)
 	response, submitErr := s.request(submitCtx, account, http.MethodPost, "/videos/generations", normalized, false)
-	upstream := ""
-	state := "submission_unknown"
-	if submitErr == nil {
-		var v struct {
-			ID        string `json:"id"`
-			RequestID string `json:"request_id"`
+	upstream, state, billing := h3SubmissionOutcome(response, submitErr)
+	if state != "pending" {
+		// Never log upstream bodies, URLs, credentials, or arbitrary transport errors.
+		status := 0
+		var httpErr *h3UpstreamHTTPError
+		if errors.As(submitErr, &httpErr) {
+			status = httpErr.StatusCode
 		}
-		if json.Unmarshal(response, &v) == nil {
-			upstream = v.RequestID
-			if upstream == "" {
-				upstream = v.ID
-			}
-			if validH3UpstreamID(upstream) {
-				state = "pending"
-			} else {
-				upstream = ""
-			}
-		}
+		log.Printf("H3 submission task=%s state=%s upstream_http_status=%d", id, state, status)
 	}
 	saveCtx, saveCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer saveCancel()
 	stage = "submission_state_save"
-	_, err = s.db.ExecContext(saveCtx, "UPDATE minimax_h3_tasks SET upstream_id=$2,generation=$3,lease_until=NULL,updated_at=now() WHERE id=$1", id, upstream, state)
+	_, err = s.db.ExecContext(saveCtx, "UPDATE minimax_h3_tasks SET upstream_id=$2,generation=$3,billing=$4,lease_until=NULL,updated_at=now() WHERE id=$1", id, upstream, state, billing)
 	if err != nil {
 		return nil, fmt.Errorf("H3 task %s requires reconciliation: %w", id, err)
 	}
 	stage = "task_reload"
 	return s.Get(saveCtx, id, key)
 }
+
+type h3UpstreamHTTPError struct {
+	StatusCode int
+}
+
+func (e *h3UpstreamHTTPError) Error() string {
+	return fmt.Sprintf("H3 upstream HTTP %d", e.StatusCode)
+}
+
+// Explicit client rejections cannot be billed. Timeouts, server errors, and
+// malformed successful replies remain ambiguous and must never be resubmitted.
+func h3SubmissionOutcome(response []byte, err error) (upstream, generation, billing string) {
+	if err != nil {
+		var httpErr *h3UpstreamHTTPError
+		if errors.As(err, &httpErr) {
+			switch httpErr.StatusCode {
+			case 400, 401, 403, 404, 405, 413, 415, 422, 429:
+				return "", "failed", "not_billable"
+			}
+		}
+		return "", "submission_unknown", "pending"
+	}
+	var v struct {
+		ID        string `json:"id"`
+		RequestID string `json:"request_id"`
+	}
+	if json.Unmarshal(response, &v) == nil {
+		upstream = v.RequestID
+		if upstream == "" {
+			upstream = v.ID
+		}
+		if validH3UpstreamID(upstream) {
+			return upstream, "pending", "pending"
+		}
+	}
+	return "", "submission_unknown", "pending"
+}
+
 func validH3UpstreamID(id string) bool {
 	return len(id) > 0 && len(id) < 256 && !strings.ContainsAny(id, "/\\?#\x00\r\n")
 }
@@ -329,7 +371,7 @@ func (s *H3Service) request(ctx context.Context, a *Account, method, path string
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("H3 upstream HTTP %d", resp.StatusCode)
+		return nil, &h3UpstreamHTTPError{StatusCode: resp.StatusCode}
 	}
 	limit := int64(2 << 20)
 	if strings.HasSuffix(path, "/content") {
