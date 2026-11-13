@@ -138,16 +138,27 @@ func (r *userGroupRateRepository) GetByUserAndGroup(ctx context.Context, userID,
 	query := `SELECT rate_multiplier FROM user_group_rate_multipliers WHERE user_id = $1 AND group_id = $2`
 	var rate sql.NullFloat64
 	err := scanSingleRow(ctx, r.sql, query, []any{userID, groupID}, &rate)
+	if err != nil && err != sql.ErrNoRows {
+		return nil, err
+	}
+	if err == nil && rate.Valid {
+		v := rate.Float64
+		return &v, nil
+	}
+	// 无用户专属倍率：回退到 VIP 倍率（仅 VIP 用户且该分组配置了 VIP 价）
+	var vip sql.NullFloat64
+	vipQuery := `SELECT gv.rate_multiplier FROM group_vip_rates gv JOIN vip_users vu ON vu.user_id = $1 WHERE gv.group_id = $2`
+	err = scanSingleRow(ctx, r.sql, vipQuery, []any{userID, groupID}, &vip)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	if !rate.Valid {
+	if !vip.Valid {
 		return nil, nil
 	}
-	v := rate.Float64
+	v := vip.Float64
 	return &v, nil
 }
 

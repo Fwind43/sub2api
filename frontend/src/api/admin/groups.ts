@@ -470,6 +470,39 @@ export async function getCapacitySummary(): Promise<
   return data
 }
 
+/**
+ * VIP: group VIP rate + global VIP user list
+ */
+export interface VIPUserEntry {
+  user_id: number
+  email: string
+  username: string
+  notes: string
+  created_at?: string
+}
+
+export async function getGroupVIPRate(id: number): Promise<number | null> {
+  const { data } = await apiClient.get<{ vip_rate_multiplier: number | null }>(`/admin/groups/${id}/vip-rate`)
+  return data.vip_rate_multiplier ?? null
+}
+
+export async function setGroupVIPRate(id: number, rate: number | null): Promise<void> {
+  await apiClient.put(`/admin/groups/${id}/vip-rate`, { rate_multiplier: rate })
+}
+
+export async function listVIPUsers(): Promise<VIPUserEntry[]> {
+  const { data } = await apiClient.get<{ items: VIPUserEntry[] | null }>('/admin/vip-users')
+  return data.items ?? []
+}
+
+export async function addVIPUsers(userIds: number[], notes = ''): Promise<void> {
+  await apiClient.post('/admin/vip-users', { user_ids: userIds, notes })
+}
+
+export async function removeVIPUsers(userIds: number[]): Promise<void> {
+  await apiClient.delete('/admin/vip-users', { data: { user_ids: userIds } })
+}
+
 export const groupsAPI = {
   list,
   getAll,
@@ -493,6 +526,11 @@ export const groupsAPI = {
   getGroupRateMultipliers,
   clearGroupRateMultipliers,
   batchSetGroupRateMultipliers,
+  getGroupVIPRate,
+  setGroupVIPRate,
+  listVIPUsers,
+  addVIPUsers,
+  removeVIPUsers,
   getGroupRPMOverrides,
   clearGroupRPMOverrides,
   batchSetGroupRPMOverrides,

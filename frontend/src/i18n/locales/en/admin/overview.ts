@@ -1024,6 +1024,16 @@ export default {
       groupRpmDefault: 'Group default RPM',
       searchUserPlaceholder: 'Search user email...',
       noRateMultipliers: 'No user rate multipliers configured',
+      vip: {
+        title: 'VIP pricing',
+        hint: 'The VIP list is shared across groups; listed users are billed at the VIP rate in this group. Priority: per-user rate > VIP rate > group rate. Changes may take a short while to apply due to caching.',
+        rate: 'VIP rate',
+        ratePlaceholder: 'Empty = disabled',
+        clear: 'Clear',
+        saved: 'Saved',
+        users: 'VIP users',
+        empty: 'No VIP users yet; search a user to add'
+      },
       rateUpdated: 'Rate multiplier updated',
       rateDeleted: 'Rate multiplier removed',
       rateAdded: 'Rate multiplier added',

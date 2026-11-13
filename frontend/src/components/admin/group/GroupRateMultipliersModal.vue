@@ -15,6 +15,8 @@
         </span>
       </div>
 
+      <GroupVipSection :show="show" :group-id="group.id" />
+
       <!-- 操作区 -->
       <div class="rounded-lg border border-gray-200 p-3 dark:border-dark-600">
         <!-- 添加用户 -->
@@ -249,6 +251,7 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import Icon from '@/components/icons/Icon.vue'
 import PlatformIcon from '@/components/common/PlatformIcon.vue'
+import GroupVipSection from './GroupVipSection.vue'
 import { platformLabel } from '@/utils/platformColors'
 
 interface LocalEntry extends GroupRateMultiplierEntry {}

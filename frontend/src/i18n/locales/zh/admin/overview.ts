@@ -1043,6 +1043,16 @@ export default {
       groupRpmDefault: '分组默认 RPM',
       searchUserPlaceholder: '搜索用户邮箱...',
       noRateMultipliers: '暂无用户设置了专属倍率',
+      vip: {
+        title: 'VIP 专属价格',
+        hint: 'VIP 名单全局共用；名单内用户在本分组按 VIP 倍率计费。优先级：用户专属倍率 > VIP 倍率 > 分组倍率。修改后因缓存最多延迟片刻生效。',
+        rate: 'VIP 倍率',
+        ratePlaceholder: '留空=不启用',
+        clear: '清除',
+        saved: '已保存',
+        users: 'VIP 用户',
+        empty: '暂无 VIP 用户，搜索用户即可添加'
+      },
       rateUpdated: '专属倍率已更新',
       rateDeleted: '专属倍率已删除',
       rateAdded: '专属倍率已添加',
