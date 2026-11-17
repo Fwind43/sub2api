@@ -25,10 +25,10 @@ import (
 type GrokMediaEndpoint string
 
 const (
-	GrokMediaEndpointImagesGenerations GrokMediaEndpoint = "images_generations"
-	GrokMediaEndpointImagesEdits       GrokMediaEndpoint = "images_edits"
-	GrokMediaEndpointVideosGenerations GrokMediaEndpoint = "videos_generations"
-	GrokMediaEndpointVideosEdits       GrokMediaEndpoint = "videos_edits"
+	GrokMediaEndpointImagesGenerations       GrokMediaEndpoint = "images_generations"
+	GrokMediaEndpointImagesEdits             GrokMediaEndpoint = "images_edits"
+	GrokMediaEndpointVideosGenerations       GrokMediaEndpoint = "videos_generations"
+	GrokMediaEndpointVideosEdits             GrokMediaEndpoint = "videos_edits"
 	GrokMediaEndpointVideosExtensions        GrokMediaEndpoint = "videos_extensions"
 	GrokMediaEndpointVideoStatus             GrokMediaEndpoint = "video_status"
 	GrokMediaEndpointVideosGenerationsStatus GrokMediaEndpoint = "videos_generations_status"
@@ -818,7 +818,7 @@ func (s *OpenAIGatewayService) ForwardGrokMedia(
 		return nil, err
 	}
 	if err := ValidateGrokMediaVideoRequest(endpoint, contentType, body); err != nil {
-		writeGrokMediaErrorResponse(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+		writeGrokMediaErrorResponse(c, http.StatusBadRequest, "invalid_request_error", err.Error(), "")
 		return &OpenAIForwardResult{
 			Duration: time.Since(startTime),
 		}, nil
@@ -837,7 +837,7 @@ func (s *OpenAIGatewayService) ForwardGrokMedia(
 		}
 	}
 	if err := ValidateGrokMediaVideoRequest(endpoint, contentType, body); err != nil {
-		writeGrokMediaErrorResponse(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+		writeGrokMediaErrorResponse(c, http.StatusBadRequest, "invalid_request_error", err.Error(), "")
 		return &OpenAIForwardResult{
 			Model:         requestInfo.Model,
 			BillingModel:  requestInfo.Model,
