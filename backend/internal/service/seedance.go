@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -26,6 +28,31 @@ func (e GrokMediaEndpoint) IsSeedance() bool {
 
 // SeedanceTaskKey isolates ownership and billing keys from other video providers.
 func SeedanceTaskKey(id string) string { return "seedance:" + strings.TrimSpace(id) }
+
+var (
+	seedanceDurationFlagRE   = regexp.MustCompile(`(?i)(?:^|\s)--(?:duration|dur)\s+(-?\d+)`)
+	seedanceResolutionFlagRE = regexp.MustCompile(`(?i)(?:^|\s)--(?:resolution|rs)\s+([0-9a-z_-]+)`)
+)
+
+// seedanceVideoSpec extracts the requested duration/resolution. Ark accepts
+// both top-level fields and legacy prompt flags (--duration/--dur, --resolution/--rs);
+// top-level fields win. Values are only a create-time fallback: the status
+// response's actual duration/resolution take priority for billing.
+func seedanceVideoSpec(body []byte, prompt string) (int, string) {
+	duration := 0
+	if d := gjson.GetBytes(body, "duration"); d.Type == gjson.Number {
+		duration = int(d.Int())
+	} else if m := seedanceDurationFlagRE.FindStringSubmatch(prompt); m != nil {
+		duration, _ = strconv.Atoi(m[1])
+	}
+	resolution := ""
+	if r := gjson.GetBytes(body, "resolution"); r.Type == gjson.String {
+		resolution = strings.TrimSpace(r.String())
+	} else if m := seedanceResolutionFlagRE.FindStringSubmatch(prompt); m != nil {
+		resolution = m[1]
+	}
+	return duration, resolution
+}
 
 func ParseSeedanceRequest(body []byte) (GrokMediaRequestInfo, error) {
 	var info GrokMediaRequestInfo
@@ -51,6 +78,7 @@ func ParseSeedanceRequest(body []byte) (GrokMediaRequestInfo, error) {
 		}
 	}
 	info.Prompt = strings.Join(texts, "\n")
+	info.DurationSeconds, info.Resolution = seedanceVideoSpec(body, info.Prompt)
 	return info, nil
 }
 
@@ -85,6 +113,7 @@ func (s *OpenAIGatewayService) ForwardSeedance(ctx context.Context, c *gin.Conte
 		return nil, err
 	}
 	model, upstreamModel := "", ""
+	videoDuration, videoResolution := 0, ""
 	method := http.MethodGet
 	switch endpoint {
 	case SeedanceEndpointCreate:
@@ -93,6 +122,7 @@ func (s *OpenAIGatewayService) ForwardSeedance(ctx context.Context, c *gin.Conte
 			return nil, parseErr
 		}
 		model = info.Model
+		videoDuration, videoResolution = info.DurationSeconds, info.Resolution
 		upstreamModel = account.GetMappedModel(model)
 		body, err = sjson.SetBytes(body, "model", upstreamModel)
 		if err != nil {
@@ -142,12 +172,24 @@ func (s *OpenAIGatewayService) ForwardSeedance(ctx context.Context, c *gin.Conte
 			return nil, fmt.Errorf("seedance create response missing task ID")
 		}
 		result.ResponseID = SeedanceTaskKey(id)
+		// Persisted into pending billing by the handler as a status-time fallback.
+		result.VideoDurationSeconds = videoDuration
+		result.VideoResolution = videoResolution
 	}
 	if endpoint == SeedanceEndpointStatus {
 		result.ResponseID = taskID
 		result.UpstreamModel = gjson.GetBytes(responseBody, "model").String()
 		if gjson.GetBytes(responseBody, "status").String() == "succeeded" {
+			// Success marker for the handler; it drops this back to 0 when the
+			// group has no per-second price so the token path is used instead.
+			result.VideoCount = 1
 			result.Usage.OutputTokens = max(0, int(gjson.GetBytes(responseBody, "usage.completion_tokens").Int()))
+			// Actual generated spec drives per-second billing (duration=-1 "auto"
+			// requests only resolve here).
+			if d := gjson.GetBytes(responseBody, "duration"); d.Type == gjson.Number && d.Int() > 0 {
+				result.VideoDurationSeconds = int(d.Int())
+			}
+			result.VideoResolution = strings.TrimSpace(gjson.GetBytes(responseBody, "resolution").String())
 		}
 	}
 	writeGrokMediaResponse(c, resp, responseBody, s.responseHeaderFilter)

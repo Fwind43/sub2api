@@ -38,14 +38,27 @@ func (h *OpenAIGatewayHandler) SeedanceTasks(c *gin.Context) {
 	h.handleGrokMedia(c, endpoint, taskID)
 }
 
-// Ark reports actual completion tokens. Never infer tokens from duration or use
-// Grok's per-second video tariff. Repeated polls share the durable task dedup key.
+// Seedance bills per second when the group configures a video price for the
+// model (resolution tier or group default); otherwise it bills Ark's actual
+// completion tokens. Never infer tokens from duration. Repeated polls share
+// the durable task dedup key.
 func prepareSeedanceCompletionBilling(ctx context.Context, h *OpenAIGatewayHandler, key *service.APIKey, subject middleware.AuthSubject, taskID string, result *service.OpenAIForwardResult) *service.OpenAIForwardResult {
-	if result == nil || result.Usage.OutputTokens <= 0 {
+	if result == nil || key == nil || (result.VideoCount <= 0 && result.Usage.OutputTokens <= 0) {
 		return nil
 	}
 	pending, err := h.gatewayService.LoadGrokVideoPendingBilling(ctx, taskID, subject.UserID, key.ID)
 	if err != nil || pending == nil {
+		return nil
+	}
+	billingModel := firstNonEmptyString(pending.BillingModel, pending.Model)
+	durationSeconds := result.VideoDurationSeconds
+	if durationSeconds <= 0 {
+		durationSeconds = pending.VideoDurationSeconds
+	}
+	resolution := firstNonEmptyString(result.VideoResolution, pending.VideoResolution)
+	perSecond := result.VideoCount > 0 && key.Group != nil &&
+		key.Group.GetVideoPriceForModel(billingModel, service.NormalizeVideoBillingResolutionOrDefault(resolution)) != nil
+	if !perSecond && result.Usage.OutputTokens <= 0 {
 		return nil
 	}
 	claimed, err := h.gatewayService.ClaimGrokVideoBilling(ctx, taskID, subject.UserID, key.ID)
@@ -54,7 +67,14 @@ func prepareSeedanceCompletionBilling(ctx context.Context, h *OpenAIGatewayHandl
 	}
 	merged := *result
 	merged.Model = pending.Model
-	merged.BillingModel = firstNonEmptyString(pending.BillingModel, pending.Model)
+	merged.BillingModel = billingModel
+	if perSecond {
+		merged.VideoCount = 1
+		merged.VideoDurationSeconds = durationSeconds
+		merged.VideoResolution = resolution
+	} else {
+		merged.VideoCount = 0
+	}
 	merged.UpstreamModel = firstNonEmptyString(pending.UpstreamModel, result.UpstreamModel)
 	merged.RequestID = service.StableGrokVideoBillingRequestID(taskID)
 	merged.ResponseID = taskID
