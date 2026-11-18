@@ -10,6 +10,7 @@ import {
   imagePricingI18nKey,
   supportsImagePricingPlatform,
   supportsVideoPricingPlatform,
+  supportsVideoRateMultiplierPlatform,
   videoPricingI18nKey,
 } from "../groupsImagePricing";
 
@@ -22,6 +23,10 @@ describe("groups image pricing platform support", () => {
   it("enables video pricing controls for Grok only", () => {
     expect(supportsVideoPricingPlatform("grok")).toBe(true);
     expect(supportsVideoPricingPlatform("openai")).toBe(false);
+    expect(supportsVideoPricingPlatform("composite")).toBe(false);
+    expect(supportsVideoRateMultiplierPlatform("grok")).toBe(true);
+    expect(supportsVideoRateMultiplierPlatform("composite")).toBe(true);
+    expect(supportsVideoRateMultiplierPlatform("openai")).toBe(false);
   });
 
   it("keeps non-media group platforms out of the image pricing controls", () => {

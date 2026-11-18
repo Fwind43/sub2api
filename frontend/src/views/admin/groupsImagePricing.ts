@@ -18,6 +18,11 @@ export const defaultAllowImageGenerationForPlatform = (platform: string): boolea
 export const supportsVideoPricingPlatform = (platform: string): boolean =>
   platform === "grok";
 
+// 视频倍率（独立视频倍率开关 + 视频倍率）作用于所有视频计费：Grok 视频，以及组合平台
+// （MiniMax H3 等）的视频任务。每秒价格表仍仅 Grok 适用。
+export const supportsVideoRateMultiplierPlatform = (platform: string): boolean =>
+  platform === "grok" || platform === "composite";
+
 export const imagePricingI18nKey = (_platform: string, key: string): string =>
   `admin.groups.imagePricing.${key}`;
 
