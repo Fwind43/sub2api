@@ -27,6 +27,7 @@
                 <th scope="col" class="px-4 py-3 font-medium">{{ t('videoTasks.generation') }}</th>
                 <th scope="col" class="px-4 py-3 font-medium">{{ t('videoTasks.delivery') }}</th>
                 <th scope="col" class="px-4 py-3 font-medium">{{ t('videoTasks.billing') }}</th>
+                <th scope="col" class="px-4 py-3 font-medium">{{ t('videoTasks.cost') }}</th>
                 <th scope="col" class="px-4 py-3 font-medium">{{ t('videoTasks.actions') }}</th>
               </tr>
             </thead>
@@ -51,6 +52,16 @@
                 </td>
                 <td v-for="field in statusFields" :key="field" class="whitespace-nowrap px-4 py-3">
                   <span class="badge" :class="badgeFor(task[field])">{{ statusLabel(task[field]) }}</span>
+                </td>
+                <td class="whitespace-nowrap px-4 py-3 tabular-nums">
+                  <span v-if="task.cost == null" class="text-gray-400">-</span>
+                  <span v-else-if="task.billing_status === 'settled'" class="font-medium text-gray-900 dark:text-white">
+                    {{ formatCurrency(task.cost) }}
+                  </span>
+                  <span v-else-if="task.billing_status === 'pending'" class="text-gray-500 dark:text-dark-300">
+                    {{ t('videoTasks.estimatedCost', { amount: formatCurrency(task.cost) }) }}
+                  </span>
+                  <span v-else class="text-gray-400">{{ t('videoTasks.notCharged') }}</span>
                 </td>
                 <td class="whitespace-nowrap px-4 py-3">
                   <div class="flex items-center gap-2">
@@ -105,7 +116,7 @@ import Icon from '@/components/icons/Icon.vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import { useClipboard } from '@/composables/useClipboard'
 import { useAppStore } from '@/stores/app'
-import { formatDateTime } from '@/utils/format'
+import { formatCurrency, formatDateTime } from '@/utils/format'
 
 const { t, te } = useI18n()
 const { copyToClipboard } = useClipboard()

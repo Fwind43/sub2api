@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"time"
 
@@ -10,11 +11,14 @@ import (
 
 // H3HistoryItem is the user-facing projection of a persisted H3 task.
 type H3HistoryItem struct {
-	ID         string    `json:"id"`
-	Generation string    `json:"status"`
-	Delivery   string    `json:"delivery_status"`
-	Billing    string    `json:"billing_status"`
-	CreatedAt  time.Time `json:"created_at"`
+	ID         string `json:"id"`
+	Generation string `json:"status"`
+	Delivery   string `json:"delivery_status"`
+	Billing    string `json:"billing_status"`
+	// Cost is the price locked at submission (balance/quota charge on
+	// settlement). Only settled tasks were actually charged.
+	Cost      *float64  `json:"cost"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // ListUserTasks includes historical tasks even if their API key was deleted.
@@ -29,7 +33,7 @@ func (s *H3Service) ListUserTasks(ctx context.Context, userID int64, page, pageS
 		return items, total, nil
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, generation, delivery, billing, created_at
+		SELECT id, generation, delivery, billing, (snapshot->'cost'->>'ActualCost')::float8, created_at
 		FROM minimax_h3_tasks WHERE user_id = $1
 		ORDER BY created_at DESC, id DESC LIMIT $2 OFFSET $3`, userID, pageSize, offset)
 	if err != nil {
@@ -38,8 +42,12 @@ func (s *H3Service) ListUserTasks(ctx context.Context, userID int64, page, pageS
 	defer rows.Close()
 	for rows.Next() {
 		var item H3HistoryItem
-		if err := rows.Scan(&item.ID, &item.Generation, &item.Delivery, &item.Billing, &item.CreatedAt); err != nil {
+		var cost sql.NullFloat64
+		if err := rows.Scan(&item.ID, &item.Generation, &item.Delivery, &item.Billing, &cost, &item.CreatedAt); err != nil {
 			return nil, 0, err
+		}
+		if cost.Valid {
+			item.Cost = &cost.Float64
 		}
 		items = append(items, item)
 	}
@@ -87,5 +95,10 @@ func (s *H3Service) RefreshUserTask(ctx context.Context, id string, userID int64
 
 // HistoryItem projects a task for the user-facing history API.
 func (t *H3Task) HistoryItem() H3HistoryItem {
-	return H3HistoryItem{ID: t.ID, Generation: t.Generation, Delivery: t.Delivery, Billing: t.Billing, CreatedAt: t.CreatedAt}
+	item := H3HistoryItem{ID: t.ID, Generation: t.Generation, Delivery: t.Delivery, Billing: t.Billing, CreatedAt: t.CreatedAt}
+	if t.Snapshot.Cost != nil {
+		c := t.Snapshot.Cost.ActualCost
+		item.Cost = &c
+	}
+	return item
 }
