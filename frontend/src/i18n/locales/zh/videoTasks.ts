@@ -1,0 +1,23 @@
+export default {
+  title: '视频任务',
+  taskId: '任务 ID',
+  copyTaskId: '复制任务 ID {id}',
+  submittedAt: '提交时间',
+  generation: '生成状态',
+  delivery: '视频验证',
+  billing: '结算状态',
+  empty: '暂无视频任务',
+  loadFailed: '无法加载视频任务。',
+  refreshFailed: '刷新失败，以下状态可能不是最新的。',
+  states: {
+    submitting: '提交中',
+    pending: '处理中',
+    submission_unknown: '提交待核查',
+    completed: '生成完成',
+    failed: '失败',
+    unverified: '未验证',
+    verified: '已验证',
+    settled: '已结算',
+    not_billable: '不计费',
+  },
+}

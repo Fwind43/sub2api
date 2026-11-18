@@ -1,0 +1,23 @@
+export default {
+  title: 'Video Tasks',
+  taskId: 'Task ID',
+  copyTaskId: 'Copy task ID {id}',
+  submittedAt: 'Submitted at',
+  generation: 'Generation',
+  delivery: 'Video verification',
+  billing: 'Billing',
+  empty: 'No video tasks yet',
+  loadFailed: 'Could not load video tasks.',
+  refreshFailed: 'Could not refresh. The statuses below may be out of date.',
+  states: {
+    submitting: 'Submitting',
+    pending: 'Pending',
+    submission_unknown: 'Submission needs review',
+    completed: 'Generation complete',
+    failed: 'Failed',
+    unverified: 'Not verified',
+    verified: 'Verified',
+    settled: 'Settled',
+    not_billable: 'Not billed',
+  },
+}

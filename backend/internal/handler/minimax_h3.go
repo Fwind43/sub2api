@@ -6,11 +6,33 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	middleware "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
+
+func (h *OpenAIGatewayHandler) MiniMaxH3History(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	subject, ok := middleware.GetAuthSubjectFromContext(c)
+	if !ok || subject.UserID <= 0 {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	if h.h3 == nil {
+		response.Error(c, http.StatusServiceUnavailable, "H3 history unavailable")
+		return
+	}
+	page, pageSize := response.ParsePagination(c)
+	pageSize = min(pageSize, 100)
+	items, total, err := h.h3.ListUserTasks(c.Request.Context(), subject.UserID, page, pageSize)
+	if err != nil {
+		response.Error(c, http.StatusServiceUnavailable, "H3 history unavailable")
+		return
+	}
+	response.Paginated(c, items, total, page, pageSize)
+}
 
 func (h *OpenAIGatewayHandler) MiniMaxH3Create(c *gin.Context) {
 	key, ok := middleware.GetAPIKeyFromContext(c)

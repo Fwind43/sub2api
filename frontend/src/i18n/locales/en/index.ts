@@ -5,10 +5,12 @@ import common from './common'
 import dashboard from './dashboard'
 import channelMonitorV2 from './channelMonitorV2'
 import batchImage from './batchImage'
+import videoTasks from './videoTasks'
 import admin from './admin'
 import misc from './misc'
 
 export default {
+  videoTasks,
   adminAccessKeys,
   mcp,
   ...landing,
