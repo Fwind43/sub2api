@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	middleware "github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -26,7 +27,12 @@ func (h *OpenAIGatewayHandler) MiniMaxH3History(c *gin.Context) {
 	}
 	page, pageSize := response.ParsePagination(c)
 	pageSize = min(pageSize, 100)
-	items, total, err := h.h3.ListUserTasks(c.Request.Context(), subject.UserID, page, pageSize)
+	generation := c.Query("status")
+	if generation != "" && !slices.Contains(service.H3GenerationStates, generation) {
+		response.BadRequest(c, "Invalid status filter")
+		return
+	}
+	items, total, err := h.h3.ListUserTasks(c.Request.Context(), subject.UserID, generation, page, pageSize)
 	if err != nil {
 		response.Error(c, http.StatusServiceUnavailable, "H3 history unavailable")
 		return

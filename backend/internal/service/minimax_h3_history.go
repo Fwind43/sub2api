@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -21,11 +22,19 @@ type H3HistoryItem struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// H3GenerationStates lists the generation values a history filter may select.
+var H3GenerationStates = []string{"submitting", "submission_unknown", "pending", "completed", "failed"}
+
 // ListUserTasks includes historical tasks even if their API key was deleted.
-func (s *H3Service) ListUserTasks(ctx context.Context, userID int64, page, pageSize int) ([]H3HistoryItem, int64, error) {
+// A non-empty generation restricts results to that generation state.
+func (s *H3Service) ListUserTasks(ctx context.Context, userID int64, generation string, page, pageSize int) ([]H3HistoryItem, int64, error) {
 	items := make([]H3HistoryItem, 0, pageSize)
+	where, args := "user_id = $1", []any{userID}
+	if generation != "" {
+		where, args = where+" AND generation = $2", append(args, generation)
+	}
 	var total int64
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM minimax_h3_tasks WHERE user_id = $1`, userID).Scan(&total); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM minimax_h3_tasks WHERE `+where, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 	offset := (page - 1) * pageSize
@@ -34,12 +43,12 @@ func (s *H3Service) ListUserTasks(ctx context.Context, userID int64, page, pageS
 	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, generation, delivery, billing, (snapshot->'cost'->>'ActualCost')::float8, created_at
-		FROM minimax_h3_tasks WHERE user_id = $1
-		ORDER BY created_at DESC, id DESC LIMIT $2 OFFSET $3`, userID, pageSize, offset)
+		FROM minimax_h3_tasks WHERE `+where+fmt.Sprintf(`
+		ORDER BY created_at DESC, id DESC LIMIT $%d OFFSET $%d`, len(args)+1, len(args)+2), append(args, pageSize, offset)...)
 	if err != nil {
 		return nil, 0, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var item H3HistoryItem
 		var cost sql.NullFloat64

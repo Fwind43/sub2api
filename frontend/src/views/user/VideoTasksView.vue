@@ -3,10 +3,21 @@
     <div class="space-y-4">
       <div class="flex items-center justify-between gap-3">
         <h2 class="text-base font-semibold text-gray-900 dark:text-white">MiniMax H3</h2>
-        <button type="button" class="btn btn-secondary" :disabled="loading" @click="loadTasks()">
-          <Icon name="refresh" size="sm" class="mr-2" />
-          {{ t('common.refresh') }}
-        </button>
+        <div class="flex items-center gap-2">
+          <select
+            v-model="statusFilter"
+            class="input w-auto"
+            :aria-label="t('videoTasks.filterGeneration')"
+            @change="changeFilter()"
+          >
+            <option value="">{{ t('videoTasks.allGenerations') }}</option>
+            <option v-for="state in generationStates" :key="state" :value="state">{{ statusLabel(state) }}</option>
+          </select>
+          <button type="button" class="btn btn-secondary" :disabled="loading" @click="loadTasks()">
+            <Icon name="refresh" size="sm" class="mr-2" />
+            {{ t('common.refresh') }}
+          </button>
+        </div>
       </div>
 
       <p v-if="failed" role="status" class="text-sm text-red-700 dark:text-red-400">
@@ -17,7 +28,7 @@
         <p v-if="loading && !tasks.length" role="status" class="p-6 text-sm text-gray-500 dark:text-dark-300">
           {{ t('common.loading') }}
         </p>
-        <EmptyState v-else-if="!failed && !tasks.length" :title="t('videoTasks.empty')" />
+        <EmptyState v-else-if="!failed && !tasks.length" :title="t(statusFilter ? 'videoTasks.emptyFiltered' : 'videoTasks.empty')" />
         <div v-else-if="tasks.length" class="overflow-x-auto">
           <table class="w-full text-left text-sm">
             <thead class="border-b border-gray-200 bg-gray-50 text-gray-600 dark:border-dark-700 dark:bg-dark-800 dark:text-dark-300">
@@ -122,6 +133,8 @@ const { t, te } = useI18n()
 const { copyToClipboard } = useClipboard()
 const statusFields = ['status', 'delivery_status', 'billing_status'] as const
 const pageSize = 20
+const generationStates = ['failed', 'completed', 'pending', 'submitting', 'submission_unknown'] as const
+const statusFilter = ref('')
 const refreshMs = 15_000
 const tasks = ref<VideoTask[]>([])
 const page = ref(1)
@@ -224,7 +237,7 @@ async function loadTasks() {
   request = controller
   loading.value = true
   try {
-    const result = await listVideoTasks(page.value, pageSize, controller.signal)
+    const result = await listVideoTasks(page.value, pageSize, controller.signal, statusFilter.value)
     if (controller.signal.aborted) return
     tasks.value = result.items
     total.value = result.total
@@ -244,6 +257,14 @@ function changePage(next: number) {
   if (next === page.value) return
   page.value = next
   tasks.value = []
+  failed.value = false
+  void loadTasks()
+}
+
+function changeFilter() {
+  page.value = 1
+  tasks.value = []
+  total.value = 0
   failed.value = false
   void loadTasks()
 }

@@ -11,9 +11,9 @@ export interface VideoTask {
   created_at: string
 }
 
-export async function listVideoTasks(page: number, pageSize: number, signal: AbortSignal) {
+export async function listVideoTasks(page: number, pageSize: number, signal: AbortSignal, status = '') {
   const { data } = await apiClient.get<BasePaginationResponse<VideoTask>>('/user/video-tasks', {
-    params: { page, page_size: pageSize },
+    params: { page, page_size: pageSize, ...(status ? { status } : {}) },
     signal,
   })
   return data
