@@ -34,6 +34,67 @@ func (h *OpenAIGatewayHandler) MiniMaxH3History(c *gin.Context) {
 	response.Paginated(c, items, total, page, pageSize)
 }
 
+func (h *OpenAIGatewayHandler) h3UserTask(c *gin.Context, refresh bool) (*service.H3Task, bool) {
+	c.Header("Cache-Control", "no-store")
+	subject, ok := middleware.GetAuthSubjectFromContext(c)
+	if !ok || subject.UserID <= 0 {
+		response.Unauthorized(c, "User not authenticated")
+		return nil, false
+	}
+	if h.h3 == nil {
+		response.Error(c, http.StatusServiceUnavailable, "H3 history unavailable")
+		return nil, false
+	}
+	var (
+		task *service.H3Task
+		err  error
+	)
+	if refresh {
+		task, err = h.h3.RefreshUserTask(c.Request.Context(), c.Param("id"), subject.UserID)
+	} else {
+		task, err = h.h3.GetUserTask(c.Request.Context(), c.Param("id"), subject.UserID)
+	}
+	if errors.Is(err, service.ErrH3NotFound) {
+		response.NotFound(c, "Video task not found")
+		return nil, false
+	}
+	if err != nil {
+		response.Error(c, http.StatusServiceUnavailable, "H3 history unavailable")
+		return nil, false
+	}
+	return task, true
+}
+
+// MiniMaxH3UserRefresh polls one of the logged-in user's tasks immediately.
+func (h *OpenAIGatewayHandler) MiniMaxH3UserRefresh(c *gin.Context) {
+	task, ok := h.h3UserTask(c, true)
+	if !ok {
+		return
+	}
+	response.Success(c, task.HistoryItem())
+}
+
+// MiniMaxH3UserContent streams a verified, settled video to its owner.
+func (h *OpenAIGatewayHandler) MiniMaxH3UserContent(c *gin.Context) {
+	task, ok := h.h3UserTask(c, false)
+	if !ok {
+		return
+	}
+	if task.Generation != "completed" || task.Delivery != "verified" || task.Billing != "settled" {
+		c.Header("Retry-After", "20")
+		response.Error(c, http.StatusConflict, "Video has not been verified and settled")
+		return
+	}
+	data, err := h.h3.Content(c.Request.Context(), task)
+	if err != nil {
+		response.Error(c, http.StatusBadGateway, "Video download unavailable")
+		return
+	}
+	c.Header("Cache-Control", "private, no-store")
+	c.Header("Content-Disposition", "inline; filename=\""+task.ID+".mp4\"")
+	c.Data(http.StatusOK, "video/mp4", data)
+}
+
 func (h *OpenAIGatewayHandler) MiniMaxH3Create(c *gin.Context) {
 	key, ok := middleware.GetAPIKeyFromContext(c)
 	if !ok {

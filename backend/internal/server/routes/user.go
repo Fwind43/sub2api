@@ -31,6 +31,8 @@ func RegisterUserRoutes(
 			user.GET("/profile", h.User.GetProfile)
 			if h.OpenAIGateway != nil {
 				user.GET("/video-tasks", h.OpenAIGateway.MiniMaxH3History)
+				user.GET("/video-tasks/:id/content", h.OpenAIGateway.MiniMaxH3UserContent)
+				user.POST("/video-tasks/:id/refresh", h.OpenAIGateway.MiniMaxH3UserRefresh)
 			}
 			if h.MCPOAuth != nil {
 				user.GET("/mcp/config", h.MCPOAuth.ConnectionConfig)

@@ -27,6 +27,7 @@
                 <th scope="col" class="px-4 py-3 font-medium">{{ t('videoTasks.generation') }}</th>
                 <th scope="col" class="px-4 py-3 font-medium">{{ t('videoTasks.delivery') }}</th>
                 <th scope="col" class="px-4 py-3 font-medium">{{ t('videoTasks.billing') }}</th>
+                <th scope="col" class="px-4 py-3 font-medium">{{ t('videoTasks.actions') }}</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-gray-100 dark:divide-dark-700">
@@ -51,6 +52,31 @@
                 <td v-for="field in statusFields" :key="field" class="whitespace-nowrap px-4 py-3">
                   <span class="badge" :class="badgeFor(task[field])">{{ statusLabel(task[field]) }}</span>
                 </td>
+                <td class="whitespace-nowrap px-4 py-3">
+                  <div class="flex items-center gap-2">
+                    <button
+                      v-if="isReady(task)"
+                      type="button"
+                      class="btn btn-primary px-2.5 py-1.5 text-xs"
+                      :disabled="previewLoadingId === task.id"
+                      @click="openPreview(task)"
+                    >
+                      {{ previewLoadingId === task.id ? t('common.loading') : t('videoTasks.view') }}
+                    </button>
+                    <button
+                      v-if="canRefresh(task)"
+                      type="button"
+                      class="btn btn-secondary px-2.5 py-1.5 text-xs"
+                      :disabled="refreshingIds.has(task.id)"
+                      :aria-label="t('videoTasks.refreshTask', { id: task.id })"
+                      @click="refreshOne(task)"
+                    >
+                      <Icon name="refresh" size="sm" class="mr-1" :class="{ 'animate-spin': refreshingIds.has(task.id) }" />
+                      {{ t('videoTasks.updateStatus') }}
+                    </button>
+                    <span v-if="!isReady(task) && !canRefresh(task)" class="text-xs text-gray-400">-</span>
+                  </div>
+                </td>
               </tr>
             </tbody>
           </table>
@@ -65,18 +91,30 @@
         />
       </section>
     </div>
+
+    <BaseDialog :show="!!preview" :title="preview?.id || ''" width="wide" @close="closePreview">
+      <div v-if="preview" class="space-y-3">
+        <video :src="preview.url" controls autoplay playsinline class="max-h-[70vh] w-full rounded bg-black" />
+        <div class="flex justify-end gap-2">
+          <a class="btn btn-secondary" :href="preview.url" target="_blank" rel="noopener">{{ t('videoTasks.openInNewTab') }}</a>
+          <a class="btn btn-primary" :href="preview.url" :download="`${preview.id}.mp4`">{{ t('videoTasks.download') }}</a>
+        </div>
+      </div>
+    </BaseDialog>
   </AppLayout>
 </template>
 
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { listVideoTasks, type VideoTask } from '@/api/videoTasks'
+import { fetchVideoTaskContent, listVideoTasks, refreshVideoTask, type VideoTask } from '@/api/videoTasks'
+import BaseDialog from '@/components/common/BaseDialog.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import Icon from '@/components/icons/Icon.vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import { useClipboard } from '@/composables/useClipboard'
+import { useAppStore } from '@/stores/app'
 import { formatDateTime } from '@/utils/format'
 
 const { t, te } = useI18n()
@@ -91,6 +129,54 @@ const loading = ref(true)
 const failed = ref(false)
 let request: AbortController | undefined
 let timer: number | undefined
+const appStore = useAppStore()
+const refreshingIds = ref(new Set<string>())
+const previewLoadingId = ref('')
+const preview = ref<{ id: string; url: string } | null>(null)
+
+function isReady(task: VideoTask) {
+  return task.status === 'completed' && task.delivery_status === 'verified' && task.billing_status === 'settled'
+}
+
+function canRefresh(task: VideoTask) {
+  return task.billing_status === 'pending' && (task.status === 'pending' || task.status === 'completed')
+}
+
+async function refreshOne(task: VideoTask) {
+  if (refreshingIds.value.has(task.id)) return
+  refreshingIds.value = new Set(refreshingIds.value).add(task.id)
+  try {
+    const updated = await refreshVideoTask(task.id)
+    const index = tasks.value.findIndex(item => item.id === updated.id)
+    if (index >= 0) tasks.value.splice(index, 1, updated)
+  } catch {
+    appStore.showError(t('videoTasks.refreshTaskFailed'))
+  } finally {
+    const next = new Set(refreshingIds.value)
+    next.delete(task.id)
+    refreshingIds.value = next
+    scheduleRefresh()
+  }
+}
+
+async function openPreview(task: VideoTask) {
+  if (previewLoadingId.value) return
+  previewLoadingId.value = task.id
+  try {
+    const blob = await fetchVideoTaskContent(task.id)
+    closePreview()
+    preview.value = { id: task.id, url: URL.createObjectURL(new Blob([blob], { type: 'video/mp4' })) }
+  } catch {
+    appStore.showError(t('videoTasks.previewFailed'))
+  } finally {
+    previewLoadingId.value = ''
+  }
+}
+
+function closePreview() {
+  if (preview.value) URL.revokeObjectURL(preview.value.url)
+  preview.value = null
+}
 
 function statusLabel(status: string) {
   const key = `videoTasks.states.${status}`
@@ -175,5 +261,6 @@ onUnmounted(() => {
   request?.abort()
   request = undefined
   window.clearTimeout(timer)
+  closePreview()
 })
 </script>

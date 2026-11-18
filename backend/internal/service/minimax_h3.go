@@ -653,8 +653,14 @@ func (s *H3Service) poll(ctx context.Context) {
 		}
 		return
 	}
+	s.processClaimed(ctx, t, token)
+}
+
+// processClaimed advances a leased task once and releases its lease.
+func (s *H3Service) processClaimed(ctx context.Context, t *H3Task, token string) {
 	work, cancel := context.WithTimeout(ctx, 100*time.Second)
 	defer cancel()
+	var err error
 	if t.Generation == "submitting" {
 		t.Generation = "submission_unknown"
 	} else {

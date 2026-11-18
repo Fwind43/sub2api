@@ -16,3 +16,22 @@ export async function listVideoTasks(page: number, pageSize: number, signal: Abo
   })
   return data
 }
+
+export async function refreshVideoTask(id: string) {
+  const { data } = await apiClient.post<VideoTask>(
+    `/user/video-tasks/${encodeURIComponent(id)}/refresh`,
+    undefined,
+    // Refresh may download and verify the finished MP4 before settling.
+    { timeout: 120_000 },
+  )
+  return data
+}
+
+export async function fetchVideoTaskContent(id: string, signal?: AbortSignal) {
+  const { data } = await apiClient.get<Blob>(`/user/video-tasks/${encodeURIComponent(id)}/content`, {
+    responseType: 'blob',
+    timeout: 120_000,
+    signal,
+  })
+  return data
+}
