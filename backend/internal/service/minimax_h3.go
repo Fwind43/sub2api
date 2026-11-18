@@ -27,10 +27,12 @@ import (
 const H3Model = "MiniMax-H3"
 const OpenAIEndpointCapabilityMiniMaxH3 OpenAIEndpointCapability = "minimax_h3"
 const h3MaxVideo = 128 << 20
-const h3SubmissionTimeout = 30 * time.Minute
 
-// Exceeds the upstream deadline plus the bounded state-save window.
+// The upstream now only needs to accept the payload, not render the video.
+const h3SubmissionTimeout = 2 * time.Minute
+const h3SubmissionSaveTimeout = 10 * time.Second
 const h3SubmissionLeaseSeconds = int((h3SubmissionTimeout + time.Minute) / time.Second)
+const h3SubmitPath = "/videos/generations"
 
 var ErrH3NotFound = errors.New("H3 task not found")
 var ErrH3Conflict = errors.New("idempotency key belongs to a different request")
@@ -352,27 +354,62 @@ func (s *H3Service) startSubmission(ctx context.Context, id string, account *Acc
 }
 
 func (s *H3Service) submit(ctx context.Context, id string, account *Account, body []byte) {
-	// Never retry this POST. A lost response is an ambiguous paid submission.
+	// Never retry this POST automatically. A lost response is still ambiguous.
 	start := time.Now()
 	var diag h3RequestDiagnostics
-	response, submitErr := s.requestWithDiagnostics(ctx, account, http.MethodPost, "/videos/generations", body, false, &diag)
+	response, submitErr := s.requestWithDiagnostics(ctx, account, http.MethodPost, h3SubmitPath, body, false, &diag, h3UpstreamIdempotencyKey(id))
 	upstream, state, billing := h3SubmissionOutcome(response, submitErr)
 	if submitErr == nil && state == "submission_unknown" {
 		diag.failure = "invalid_receipt"
 	}
-	// Never log raw errors, bodies, or endpoints. Response trace IDs are not task IDs.
-	log.Printf("H3 submission task=%s state=%s account_id=%d upstream_http_status=%d failure=%q elapsed_ms=%d upstream_request_id=%q upstream_cf_ray=%q",
-		id, state, account.ID, diag.status, diag.failure, time.Since(start).Milliseconds(), diag.requestID, diag.cfRay)
-	saveCtx, saveCancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer saveCancel()
-	result, err := s.db.ExecContext(saveCtx, "UPDATE minimax_h3_tasks SET upstream_id=$2,generation=$3,billing=$4,lease_until=NULL,updated_at=now() WHERE id=$1 AND generation='submitting' AND upstream_id=''", id, upstream, state, billing)
-	if err != nil {
-		log.Printf("H3 submission task=%s checkpoint_failed=true", id)
-		return
+	// The receipt ID is distinct from HTTP tracing IDs. Keep it available for
+	// reconciliation even when the database is temporarily unavailable.
+	log.Printf("H3 submission task=%s state=%s account_id=%d upstream_http_status=%d failure=%q elapsed_ms=%d upstream_task_id=%q upstream_request_id=%q upstream_cf_ray=%q",
+		id, state, account.ID, diag.status, diag.failure, time.Since(start).Milliseconds(), upstream, diag.requestID, diag.cfRay)
+	s.saveSubmissionOutcome(id, upstream, state, billing)
+}
+
+func h3UpstreamIdempotencyKey(id string) string {
+	return "sub2api-h3-" + id
+}
+
+func (s *H3Service) saveSubmissionOutcome(id, upstream, state, billing string) {
+	// The original submit context may have timed out or been canceled at shutdown.
+	// A valid receipt can recover a task after its submission lease expired.
+	// Clear the lease token so that a concurrent poll cannot overwrite it.
+	// Retry only this conditional update, never the upstream generation request.
+	const query = `UPDATE minimax_h3_tasks SET upstream_id=$2,generation=$3,billing=$4,lease_until=NULL,lease_token='',updated_at=now()
+WHERE id=$1 AND upstream_id='' AND billing='pending' AND (generation='submitting' OR (generation='submission_unknown' AND $2<>''))`
+	for attempt := 0; attempt < 3; attempt++ {
+		ctx, cancel := context.WithTimeout(context.Background(), h3SubmissionSaveTimeout)
+		result, err := s.db.ExecContext(ctx, query, id, upstream, state, billing)
+		cancel()
+		if err == nil {
+			if n, countErr := result.RowsAffected(); countErr == nil {
+				if n == 1 || s.submissionOutcomeSaved(id, upstream, state, billing) {
+					return
+				}
+				log.Printf("H3 submission task=%s checkpoint_conflict=true", id)
+				return
+			}
+		}
+		if attempt < 2 {
+			time.Sleep(time.Duration(attempt+1) * 250 * time.Millisecond)
+		}
 	}
-	if n, err := result.RowsAffected(); err != nil || n != 1 {
-		log.Printf("H3 submission task=%s checkpoint_conflict=true", id)
+	log.Printf("H3 submission task=%s checkpoint_failed=true", id)
+}
+
+// An UPDATE can commit even when its acknowledgement is lost. Do not report a
+// conflict if the result is already stored or a poll has advanced that receipt.
+func (s *H3Service) submissionOutcomeSaved(id, upstream, state, billing string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), h3SubmissionSaveTimeout)
+	defer cancel()
+	var storedUpstream, storedState, storedBilling string
+	if err := s.db.QueryRowContext(ctx, "SELECT upstream_id,generation,billing FROM minimax_h3_tasks WHERE id=$1", id).Scan(&storedUpstream, &storedState, &storedBilling); err != nil {
+		return false
 	}
+	return storedUpstream == upstream && (upstream != "" || (storedState == state && storedBilling == billing))
 }
 
 type h3UpstreamHTTPError struct {
@@ -454,7 +491,7 @@ func (s *H3Service) request(ctx context.Context, a *Account, method, path string
 
 // Only operator-configured endpoints are contacted. Provider-supplied URLs are
 // never followed and authorization is never sent to a video URL from JSON.
-func (s *H3Service) requestWithDiagnostics(ctx context.Context, a *Account, method, path string, body []byte, validateOnly bool, diag *h3RequestDiagnostics) ([]byte, error) {
+func (s *H3Service) requestWithDiagnostics(ctx context.Context, a *Account, method, path string, body []byte, validateOnly bool, diag *h3RequestDiagnostics, idempotencyKey ...string) ([]byte, error) {
 	if diag != nil {
 		*diag = h3RequestDiagnostics{failure: "request_setup_error"}
 	}
@@ -482,6 +519,13 @@ func (s *H3Service) requestWithDiagnostics(ctx context.Context, a *Account, meth
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
+	if len(idempotencyKey) > 0 && idempotencyKey[0] != "" {
+		req.Header.Set("Prefer", "respond-async")
+		req.Header.Set("Idempotency-Key", idempotencyKey[0])
+		// net/http otherwise treats the keyed POST with a rewindable body as
+		// replayable. Keep ambiguous submissions available for reconciliation.
+		req.GetBody = nil
+	}
 	proxy := ""
 	if a.Proxy != nil {
 		proxy = a.Proxy.URL()

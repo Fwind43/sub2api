@@ -139,13 +139,20 @@ answers preflights must allow `Authorization`, `Content-Type`, and
 `Idempotency-Key`. A 204 alone does not prove the browser can submit: check the
 explicit allowlist with an OPTIONS request before testing a paid POST.
 
+The gateway submits with `Prefer: respond-async` and a stable upstream
+`Idempotency-Key` derived from its own task ID. It saves the receipt's
+`request_id` (or legacy `id`) before polling; the upstream POST waits for
+acceptance, not rendering. A transient database error retries only the receipt
+update, not generation. Neither a 503 nor a missing receipt is proof that the
+upstream rejected the job; the gateway leaves billing pending and does not replay
+an ambiguous POST.
+
 To reconcile `submission_unknown`, look up the task ID in the gateway's H3
-submission log. Use the account ID, timestamp, HTTP status, failure category,
-and any `upstream_request_id` or `upstream_cf_ray` when contacting the upstream.
-These response-header values are tracing references, not video task IDs; their
-presence does not establish who generated the response or whether billing took
-place. A 503 or malformed successful response does not trigger an automatic
-retry or a change to the pending billing state.
+submission log. A nonempty `upstream_task_id` is a receipt ID and can help recover
+a job even if its database update failed. Use the account ID, timestamp, HTTP
+status, failure category and any `upstream_request_id` or `upstream_cf_ray` when
+contacting the upstream. Those two response-header values are tracing references,
+not video task IDs or proof of billing. Do not infer a match from timestamps alone.
 
 The provider states generated files are available for 24 hours; download promptly.
 Input media, prompts, parameters and output may be retained in its private archive.

@@ -190,7 +190,11 @@ func TestH3AsyncSubmissionLifecycle(t *testing.T) {
 			if shutdown {
 				upstreamID, generation = "", "submission_unknown"
 			}
-			query := "UPDATE minimax_h3_tasks SET upstream_id=$2,generation=$3,billing=$4,lease_until=NULL,updated_at=now() WHERE id=$1 AND generation='submitting' AND upstream_id=''"
+			query := `UPDATE minimax_h3_tasks SET upstream_id=$2,generation=$3,billing=$4,lease_until=NULL,lease_token='',updated_at=now()
+WHERE id=$1 AND upstream_id='' AND billing='pending' AND (generation='submitting' OR (generation='submission_unknown' AND $2<>''))`
+			if !shutdown {
+				mock.ExpectExec(regexp.QuoteMeta(query)).WithArgs("h3-test", upstreamID, generation, "pending").WillReturnError(errors.New("temporary database outage"))
+			}
 			mock.ExpectExec(regexp.QuoteMeta(query)).WithArgs("h3-test", upstreamID, generation, "pending").WillReturnResult(sqlmock.NewResult(0, 1))
 			transport := &h3BlockingTransport{entered: make(chan *http.Request, 1), finish: make(chan struct{})}
 			lifeCtx, cancelLife := context.WithCancel(context.Background())
@@ -225,12 +229,21 @@ func TestH3AsyncSubmissionLifecycle(t *testing.T) {
 			if HTTPUpstreamProfileFromContext(req.Context()) != HTTPUpstreamProfileLongVideo {
 				t.Fatal("missing long-video transport profile")
 			}
-			deadline, ok := req.Context().Deadline()
-			if !ok || time.Until(deadline) < 29*time.Minute {
-				t.Fatal("short submission deadline")
+			if req.Method != http.MethodPost || req.URL.Path != "/v1/videos/generations" {
+				t.Fatalf("unexpected submission route: %s %s", req.Method, req.URL.Path)
 			}
-			if time.Duration(h3SubmissionLeaseSeconds)*time.Second <= h3SubmissionTimeout+10*time.Second {
-				t.Fatal("worker lease can expire before checkpoint")
+			if req.Header.Get("Prefer") != "respond-async" || req.Header.Get("Idempotency-Key") != "sub2api-h3-h3-test" {
+				t.Fatal("missing async preference or stable upstream idempotency key")
+			}
+			if req.GetBody != nil || req.ContentLength != 2 {
+				t.Fatal("submission body must be sent without automatic replay")
+			}
+			deadline, ok := req.Context().Deadline()
+			if remaining := time.Until(deadline); !ok || remaining <= time.Minute || remaining > 2*time.Minute {
+				t.Fatal("submission deadline must be bounded by the async acceptance timeout")
+			}
+			if time.Duration(h3SubmissionLeaseSeconds)*time.Second <= h3SubmissionTimeout+3*h3SubmissionSaveTimeout+time.Second {
+				t.Fatal("worker lease can expire before checkpoint retries finish")
 			}
 			if releases.Load() != 0 {
 				t.Fatal("account slot released while submitting")
