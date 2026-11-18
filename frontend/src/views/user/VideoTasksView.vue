@@ -58,10 +58,11 @@
                       v-if="isReady(task)"
                       type="button"
                       class="btn btn-primary px-2.5 py-1.5 text-xs"
-                      :disabled="previewLoadingId === task.id"
-                      @click="openPreview(task)"
+                      :disabled="downloadingId === task.id"
+                      @click="downloadVideo(task)"
                     >
-                      {{ previewLoadingId === task.id ? t('common.loading') : t('videoTasks.view') }}
+                      <Icon name="download" size="sm" class="mr-1" />
+                      {{ downloadingId === task.id ? t('videoTasks.downloading') : t('videoTasks.downloadVideo') }}
                     </button>
                     <button
                       v-if="canRefresh(task)"
@@ -91,16 +92,6 @@
         />
       </section>
     </div>
-
-    <BaseDialog :show="!!preview" :title="preview?.id || ''" width="wide" @close="closePreview">
-      <div v-if="preview" class="space-y-3">
-        <video :src="preview.url" controls autoplay playsinline class="max-h-[70vh] w-full rounded bg-black" />
-        <div class="flex justify-end gap-2">
-          <a class="btn btn-secondary" :href="preview.url" target="_blank" rel="noopener">{{ t('videoTasks.openInNewTab') }}</a>
-          <a class="btn btn-primary" :href="preview.url" :download="`${preview.id}.mp4`">{{ t('videoTasks.download') }}</a>
-        </div>
-      </div>
-    </BaseDialog>
   </AppLayout>
 </template>
 
@@ -108,7 +99,6 @@
 import { onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { fetchVideoTaskContent, listVideoTasks, refreshVideoTask, type VideoTask } from '@/api/videoTasks'
-import BaseDialog from '@/components/common/BaseDialog.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -131,8 +121,7 @@ let request: AbortController | undefined
 let timer: number | undefined
 const appStore = useAppStore()
 const refreshingIds = ref(new Set<string>())
-const previewLoadingId = ref('')
-const preview = ref<{ id: string; url: string } | null>(null)
+const downloadingId = ref('')
 
 function isReady(task: VideoTask) {
   return task.status === 'completed' && task.delivery_status === 'verified' && task.billing_status === 'settled'
@@ -159,23 +148,25 @@ async function refreshOne(task: VideoTask) {
   }
 }
 
-async function openPreview(task: VideoTask) {
-  if (previewLoadingId.value) return
-  previewLoadingId.value = task.id
+async function downloadVideo(task: VideoTask) {
+  if (downloadingId.value) return
+  downloadingId.value = task.id
   try {
     const blob = await fetchVideoTaskContent(task.id)
-    closePreview()
-    preview.value = { id: task.id, url: URL.createObjectURL(new Blob([blob], { type: 'video/mp4' })) }
+    const url = URL.createObjectURL(new Blob([blob], { type: 'video/mp4' }))
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${task.id}.mp4`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    // Give the browser time to start the download before releasing the blob.
+    window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
   } catch {
-    appStore.showError(t('videoTasks.previewFailed'))
+    appStore.showError(t('videoTasks.downloadFailed'))
   } finally {
-    previewLoadingId.value = ''
+    downloadingId.value = ''
   }
-}
-
-function closePreview() {
-  if (preview.value) URL.revokeObjectURL(preview.value.url)
-  preview.value = null
 }
 
 function statusLabel(status: string) {
@@ -261,6 +252,5 @@ onUnmounted(() => {
   request?.abort()
   request = undefined
   window.clearTimeout(timer)
-  closePreview()
 })
 </script>
