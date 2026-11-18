@@ -134,6 +134,19 @@ If submission is unknown, do not generate a new key or automatically create a
 new job; reconcile the existing request first. Client timeouts do not imply
 cancellation or non-billing. Do not re-generate when only download failed.
 
+For cross-origin clients, the application's CORS middleware and any proxy that
+answers preflights must allow `Authorization`, `Content-Type`, and
+`Idempotency-Key`. A 204 alone does not prove the browser can submit: check the
+explicit allowlist with an OPTIONS request before testing a paid POST.
+
+To reconcile `submission_unknown`, look up the task ID in the gateway's H3
+submission log. Use the account ID, timestamp, HTTP status, failure category,
+and any `upstream_request_id` or `upstream_cf_ray` when contacting the upstream.
+These response-header values are tracing references, not video task IDs; their
+presence does not establish who generated the response or whether billing took
+place. A 503 or malformed successful response does not trigger an automatic
+retry or a change to the pending billing state.
+
 The provider states generated files are available for 24 hours; download promptly.
 Input media, prompts, parameters and output may be retained in its private archive.
 This patch adds no automatic refund, cancellation, local media decoding, voice

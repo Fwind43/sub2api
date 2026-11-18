@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -352,15 +353,16 @@ func (s *H3Service) startSubmission(ctx context.Context, id string, account *Acc
 
 func (s *H3Service) submit(ctx context.Context, id string, account *Account, body []byte) {
 	// Never retry this POST. A lost response is an ambiguous paid submission.
-	response, submitErr := s.request(ctx, account, http.MethodPost, "/videos/generations", body, false)
+	start := time.Now()
+	var diag h3RequestDiagnostics
+	response, submitErr := s.requestWithDiagnostics(ctx, account, http.MethodPost, "/videos/generations", body, false, &diag)
 	upstream, state, billing := h3SubmissionOutcome(response, submitErr)
-	status := 0
-	var httpErr *h3UpstreamHTTPError
-	if errors.As(submitErr, &httpErr) {
-		status = httpErr.StatusCode
+	if submitErr == nil && state == "submission_unknown" {
+		diag.failure = "invalid_receipt"
 	}
-	// Only fixed classifications are logged, never upstream bodies or errors.
-	log.Printf("H3 submission task=%s state=%s upstream_http_status=%d", id, state, status)
+	// Never log raw errors, bodies, or endpoints. Response trace IDs are not task IDs.
+	log.Printf("H3 submission task=%s state=%s account_id=%d upstream_http_status=%d failure=%q elapsed_ms=%d upstream_request_id=%q upstream_cf_ray=%q",
+		id, state, account.ID, diag.status, diag.failure, time.Since(start).Milliseconds(), diag.requestID, diag.cfRay)
 	saveCtx, saveCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer saveCancel()
 	result, err := s.db.ExecContext(saveCtx, "UPDATE minimax_h3_tasks SET upstream_id=$2,generation=$3,billing=$4,lease_until=NULL,updated_at=now() WHERE id=$1 AND generation='submitting' AND upstream_id=''", id, upstream, state, billing)
@@ -414,9 +416,48 @@ func validH3UpstreamID(id string) bool {
 	return len(id) > 0 && len(id) < 256 && !strings.ContainsAny(id, "/\\?#\x00\r\n")
 }
 
+type h3RequestDiagnostics struct {
+	status                    int
+	failure, requestID, cfRay string
+}
+
+// Accept only short, opaque trace tokens. A URL, free-form text, or a list of
+// header values is not a trace ID and should not appear in the submission log.
+func h3TraceID(value string) string {
+	if len(value) > 128 {
+		return ""
+	}
+	for i := 0; i < len(value); i++ {
+		c := value[i]
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_' || c == '.') {
+			return ""
+		}
+	}
+	return value
+}
+
+func h3RequestFailure(phase string, err error) string {
+	var timeout net.Error
+	switch {
+	case errors.Is(err, context.Canceled):
+		return phase + "_canceled"
+	case errors.Is(err, context.DeadlineExceeded), errors.As(err, &timeout) && timeout.Timeout():
+		return phase + "_timeout"
+	default:
+		return phase + "_error"
+	}
+}
+
+func (s *H3Service) request(ctx context.Context, a *Account, method, path string, body []byte, validateOnly bool) ([]byte, error) {
+	return s.requestWithDiagnostics(ctx, a, method, path, body, validateOnly, nil)
+}
+
 // Only operator-configured endpoints are contacted. Provider-supplied URLs are
 // never followed and authorization is never sent to a video URL from JSON.
-func (s *H3Service) request(ctx context.Context, a *Account, method, path string, body []byte, validateOnly bool) ([]byte, error) {
+func (s *H3Service) requestWithDiagnostics(ctx context.Context, a *Account, method, path string, body []byte, validateOnly bool, diag *h3RequestDiagnostics) ([]byte, error) {
+	if diag != nil {
+		*diag = h3RequestDiagnostics{failure: "request_setup_error"}
+	}
 	base := strings.TrimRight(strings.TrimSpace(a.GetCredential("base_url")), "/")
 	u, err := url.Parse(base)
 	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
@@ -427,6 +468,9 @@ func (s *H3Service) request(ctx context.Context, a *Account, method, path string
 		return nil, errors.New("H3 requires API key credentials")
 	}
 	if validateOnly {
+		if diag != nil {
+			diag.failure = ""
+		}
 		return nil, nil
 	}
 	if !strings.HasSuffix(base, "/v1") {
@@ -444,10 +488,21 @@ func (s *H3Service) request(ctx context.Context, a *Account, method, path string
 	}
 	resp, err := s.gateway.httpUpstream.Do(req, proxy, a.ID, a.Concurrency)
 	if err != nil {
+		if diag != nil {
+			diag.failure = h3RequestFailure("transport", err)
+		}
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if diag != nil {
+		diag.status = resp.StatusCode
+		diag.requestID = h3TraceID(resp.Header.Get("X-Request-ID"))
+		diag.cfRay = h3TraceID(resp.Header.Get("CF-Ray"))
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if diag != nil {
+			diag.failure = "upstream_http"
+		}
 		return nil, &h3UpstreamHTTPError{StatusCode: resp.StatusCode}
 	}
 	limit := int64(2 << 20)
@@ -456,10 +511,19 @@ func (s *H3Service) request(ctx context.Context, a *Account, method, path string
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
 	if err != nil {
+		if diag != nil {
+			diag.failure = h3RequestFailure("response_body", err)
+		}
 		return nil, err
 	}
 	if int64(len(data)) > limit {
+		if diag != nil {
+			diag.failure = "response_too_large"
+		}
 		return nil, errors.New("H3 response exceeds limit")
+	}
+	if diag != nil {
+		diag.failure = ""
 	}
 	return data, nil
 }

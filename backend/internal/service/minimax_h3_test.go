@@ -112,6 +112,38 @@ func TestH3HTTPRejectionIsTypedAndSanitized(t *testing.T) {
 	}
 }
 
+func TestH3HTTP503KeepsSubmissionUnknownWithTrace(t *testing.T) {
+	headers := make(http.Header)
+	headers.Set("X-Request-ID", "req-provider-503")
+	headers.Set("CF-Ray", "123abc-SIN")
+	transport := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusServiceUnavailable,
+		Header:     headers,
+		Body:       io.NopCloser(strings.NewReader(`{"id":"not-a-receipt"}`)),
+	}}
+	s := &H3Service{gateway: &OpenAIGatewayService{httpUpstream: transport}}
+	a := &Account{ID: 1, Credentials: map[string]any{"base_url": "https://example.org", "api_key": "test-secret"}}
+	var diag h3RequestDiagnostics
+	body, err := s.requestWithDiagnostics(context.Background(), a, http.MethodPost, "/videos/generations", []byte(`{}`), false, &diag)
+	if err == nil || len(body) != 0 || len(transport.requests) != 1 {
+		t.Fatal("a 503 must not be retried or return its response body")
+	}
+	if want := (h3RequestDiagnostics{status: 503, failure: "upstream_http", requestID: "req-provider-503", cfRay: "123abc-SIN"}); diag != want {
+		t.Fatalf("got diagnostics %+v, want %+v", diag, want)
+	}
+	if id, generation, billing := h3SubmissionOutcome(body, err); id != "" || generation != "submission_unknown" || billing != "pending" {
+		t.Fatalf("got task ID %q, generation %q, billing %q", id, generation, billing)
+	}
+}
+
+func TestH3TraceIDRejectsNonTokens(t *testing.T) {
+	for _, value := range []string{"Bearer test-secret", "a\nb", "a,b", "https://example.org/a", strings.Repeat("a", 129)} {
+		if h3TraceID(value) != "" {
+			t.Errorf("accepted non-token trace value %q", value)
+		}
+	}
+}
+
 func TestH3UpstreamIDBoundary(t *testing.T) {
 	for _, id := range []string{"", "../task", "a?token=x", "a/b", "a\n"} {
 		if validH3UpstreamID(id) {

@@ -3,6 +3,7 @@ package middleware
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -72,6 +73,32 @@ func TestCORS_DisallowedOrigin_NoAllowHeaders(t *testing.T) {
 			assert.Empty(t, w.Header().Get("Access-Control-Allow-Origin"),
 				"不允许的 origin 不应收到 Allow-Origin")
 		})
+	}
+}
+
+func TestCORS_H3SubmissionPreflight(t *testing.T) {
+	const origin = "https://image.fwind.work"
+	const path = "/v1/minimax/videos"
+	router := gin.New()
+	router.Use(CORS(config.CORSConfig{AllowedOrigins: []string{origin}}))
+	router.OPTIONS(path, func(c *gin.Context) {
+		t.Error("preflight should terminate in the CORS middleware")
+	})
+	req := httptest.NewRequest(http.MethodOptions, path, nil)
+	req.Header.Set("Origin", origin)
+	req.Header.Set("Access-Control-Request-Method", http.MethodPost)
+	req.Header.Set("Access-Control-Request-Headers", "authorization,content-type,idempotency-key")
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+
+	assert.Equal(t, http.StatusNoContent, res.Code)
+	assert.Equal(t, origin, res.Header().Get("Access-Control-Allow-Origin"))
+	allowed := make(map[string]bool)
+	for _, header := range strings.Split(res.Header().Get("Access-Control-Allow-Headers"), ",") {
+		allowed[strings.ToLower(strings.TrimSpace(header))] = true
+	}
+	for _, header := range strings.Split(req.Header.Get("Access-Control-Request-Headers"), ",") {
+		assert.True(t, allowed[header], "preflight should allow %s", header)
 	}
 }
 
