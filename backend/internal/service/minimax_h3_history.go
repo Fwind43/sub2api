@@ -12,6 +12,9 @@ import (
 
 // H3HistoryItem is the user-facing projection of a persisted H3 task.
 type H3HistoryItem struct {
+	QueuePosition *int       `json:"queue_position,omitempty"`
+	FinishedAt    *time.Time `json:"finished_at,omitempty"`
+
 	ID         string `json:"id"`
 	Generation string `json:"status"`
 	Delivery   string `json:"delivery_status"`
@@ -42,7 +45,7 @@ func (s *H3Service) ListUserTasks(ctx context.Context, userID int64, generation 
 		return items, total, nil
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, generation, delivery, billing, (snapshot->'cost'->>'ActualCost')::float8, created_at
+		SELECT id, generation, delivery, billing, (snapshot->'cost'->>'ActualCost')::float8, created_at, queue_position, CASE WHEN billing IN ('settled','not_billable') THEN updated_at END
 		FROM minimax_h3_tasks WHERE `+where+fmt.Sprintf(`
 		ORDER BY created_at DESC, id DESC LIMIT $%d OFFSET $%d`, len(args)+1, len(args)+2), append(args, pageSize, offset)...)
 	if err != nil {
@@ -52,7 +55,7 @@ func (s *H3Service) ListUserTasks(ctx context.Context, userID int64, generation 
 	for rows.Next() {
 		var item H3HistoryItem
 		var cost sql.NullFloat64
-		if err := rows.Scan(&item.ID, &item.Generation, &item.Delivery, &item.Billing, &cost, &item.CreatedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.Generation, &item.Delivery, &item.Billing, &cost, &item.CreatedAt, &item.QueuePosition, &item.FinishedAt); err != nil {
 			return nil, 0, err
 		}
 		if cost.Valid {
@@ -104,7 +107,7 @@ func (s *H3Service) RefreshUserTask(ctx context.Context, id string, userID int64
 
 // HistoryItem projects a task for the user-facing history API.
 func (t *H3Task) HistoryItem() H3HistoryItem {
-	item := H3HistoryItem{ID: t.ID, Generation: t.Generation, Delivery: t.Delivery, Billing: t.Billing, CreatedAt: t.CreatedAt}
+	item := H3HistoryItem{ID: t.ID, Generation: t.Generation, Delivery: t.Delivery, Billing: t.Billing, CreatedAt: t.CreatedAt, QueuePosition: t.QueuePosition, FinishedAt: t.FinishedAt}
 	if t.Snapshot.Cost != nil {
 		c := t.Snapshot.Cost.ActualCost
 		item.Cost = &c

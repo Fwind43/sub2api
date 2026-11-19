@@ -17,7 +17,7 @@ func TestH3ListUserTasks(t *testing.T) {
 	s := &H3Service{db: db}
 	const userID int64 = 41
 	const countQuery = `SELECT COUNT(*) FROM minimax_h3_tasks WHERE user_id = $1`
-	const pageQuery = `SELECT id, generation, delivery, billing, (snapshot->'cost'->>'ActualCost')::float8, created_at
+	const pageQuery = `SELECT id, generation, delivery, billing, (snapshot->'cost'->>'ActualCost')::float8, created_at, queue_position, CASE WHEN billing IN ('settled','not_billable') THEN updated_at END
 		FROM minimax_h3_tasks WHERE user_id = $1
 		ORDER BY created_at DESC, id DESC LIMIT $2 OFFSET $3`
 	createdAt := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
@@ -26,8 +26,8 @@ func TestH3ListUserTasks(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta(countQuery)).WithArgs(userID).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(21))
 	mock.ExpectQuery(regexp.QuoteMeta(pageQuery)).WithArgs(userID, 20, 20).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "generation", "delivery", "billing", "cost", "created_at"}).
-			AddRow("h3-reconcile", "submission_unknown", "unverified", "pending", cost, createdAt))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "generation", "delivery", "billing", "cost", "created_at", "queue_position", "finished_at"}).
+			AddRow("h3-reconcile", "submission_unknown", "unverified", "pending", cost, createdAt, nil, nil))
 	items, total, err := s.ListUserTasks(context.Background(), userID, "", 2, 20)
 	require.NoError(t, err)
 	require.Equal(t, int64(21), total)
@@ -58,13 +58,13 @@ func TestH3ListUserTasksGenerationFilter(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta(`FROM minimax_h3_tasks WHERE user_id = $1 AND generation = $2
 		ORDER BY created_at DESC, id DESC LIMIT $3 OFFSET $4`)).
 		WithArgs(int64(7), "completed", 20, 0).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "generation", "delivery", "billing", "cost", "created_at"}).
-			AddRow("h3-done", "completed", "verified", "settled", nil, createdAt))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "generation", "delivery", "billing", "cost", "created_at", "queue_position", "finished_at"}).
+			AddRow("h3-done", "completed", "verified", "settled", nil, createdAt, nil, createdAt))
 	items, total, err := s.ListUserTasks(context.Background(), 7, "completed", 1, 20)
 	require.NoError(t, err)
 	require.Equal(t, int64(1), total)
 	require.Equal(t, []H3HistoryItem{{
-		ID: "h3-done", Generation: "completed", Delivery: "verified", Billing: "settled", CreatedAt: createdAt,
+		ID: "h3-done", Generation: "completed", Delivery: "verified", Billing: "settled", FinishedAt: &createdAt, CreatedAt: createdAt,
 	}}, items)
 	require.NoError(t, mock.ExpectationsWereMet())
 }

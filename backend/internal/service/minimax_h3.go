@@ -61,6 +61,9 @@ type H3Snapshot struct {
 	PricingAt             time.Time         `json:"pricing_at"`
 }
 type H3Task struct {
+	QueuePosition *int       `json:"queue_position,omitempty"`
+	FinishedAt    *time.Time `json:"finished_at,omitempty"`
+
 	ID         string     `json:"id"`
 	UserID     int64      `json:"-"`
 	APIKeyID   int64      `json:"-"`
@@ -179,14 +182,14 @@ func prepareH3Request(body []byte) (H3Snapshot, []byte, error) {
 	return snap, normalized, err
 }
 
-const h3Columns = "id,user_id,api_key_id,group_id,account_id,upstream_id,generation,delivery,billing,snapshot,created_at,lease_token,payload_hash"
+const h3Columns = "id,user_id,api_key_id,group_id,account_id,upstream_id,generation,delivery,billing,snapshot,created_at,lease_token,payload_hash,queue_position,CASE WHEN billing IN ('settled','not_billable') THEN updated_at END"
 
 type h3Scanner interface{ Scan(...any) error }
 
 func scanH3(row h3Scanner) (*H3Task, error) {
 	t := &H3Task{}
 	var raw []byte
-	err := row.Scan(&t.ID, &t.UserID, &t.APIKeyID, &t.GroupID, &t.AccountID, &t.UpstreamID, &t.Generation, &t.Delivery, &t.Billing, &raw, &t.CreatedAt, &t.lease, &t.hash)
+	err := row.Scan(&t.ID, &t.UserID, &t.APIKeyID, &t.GroupID, &t.AccountID, &t.UpstreamID, &t.Generation, &t.Delivery, &t.Billing, &raw, &t.CreatedAt, &t.lease, &t.hash, &t.QueuePosition, &t.FinishedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrH3NotFound
 	}
@@ -723,7 +726,7 @@ func (s *H3Service) processClaimed(ctx context.Context, t *H3Task, token string)
 	}
 	save, cancelSave := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelSave()
-	_, saveErr := s.db.ExecContext(save, `UPDATE minimax_h3_tasks SET generation=$2,delivery=$3,billing=$4,lease_until=NULL,lease_token='',next_poll_at=now()+interval '20 seconds',updated_at=now() WHERE id=$1 AND lease_token=$5`, t.ID, t.Generation, t.Delivery, t.Billing, token)
+	_, saveErr := s.db.ExecContext(save, `UPDATE minimax_h3_tasks SET generation=$2,delivery=$3,billing=$4,queue_position=$6,lease_until=NULL,lease_token='',next_poll_at=now()+interval '20 seconds',updated_at=now() WHERE id=$1 AND lease_token=$5`, t.ID, t.Generation, t.Delivery, t.Billing, token, t.QueuePosition)
 	if saveErr != nil {
 		log.Printf("H3 task %s checkpoint failed: %v", t.ID, saveErr)
 	}
@@ -742,12 +745,19 @@ func (s *H3Service) advance(ctx context.Context, t *H3Task) error {
 			return err
 		}
 		var v struct {
-			Status string `json:"status"`
+			QueuePosition *int   `json:"queue_position"`
+			Status        string `json:"status"`
 		}
 		if err = json.Unmarshal(data, &v); err != nil {
 			return err
 		}
+		t.QueuePosition = nil
 		switch strings.ToLower(v.Status) {
+		case "queued":
+			if v.QueuePosition != nil && *v.QueuePosition >= 0 {
+				t.QueuePosition = v.QueuePosition
+			}
+			return nil
 		case "failed", "cancelled", "canceled", "expired":
 			t.Generation = "failed"
 			t.Billing = "not_billable"

@@ -8,6 +8,8 @@ export interface VideoTask {
   billing_status: string
   /** Price locked at submission; only charged once billing_status is settled. */
   cost: number | null
+  queue_position?: number
+  finished_at?: string
   created_at: string
 }
 

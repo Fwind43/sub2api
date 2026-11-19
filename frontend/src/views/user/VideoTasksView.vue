@@ -35,6 +35,7 @@
               <tr>
                 <th scope="col" class="min-w-48 px-4 py-3 font-medium">{{ t('videoTasks.taskId') }}</th>
                 <th scope="col" class="px-4 py-3 font-medium">{{ t('videoTasks.submittedAt') }}</th>
+                <th scope="col" class="px-4 py-3 font-medium">{{ t('videoTasks.elapsed') }}</th>
                 <th scope="col" class="px-4 py-3 font-medium">{{ t('videoTasks.generation') }}</th>
                 <th scope="col" class="px-4 py-3 font-medium">{{ t('videoTasks.delivery') }}</th>
                 <th scope="col" class="px-4 py-3 font-medium">{{ t('videoTasks.billing') }}</th>
@@ -61,8 +62,9 @@
                 <td class="whitespace-nowrap px-4 py-3">
                   <time :datetime="task.created_at">{{ formatDateTime(task.created_at) }}</time>
                 </td>
+                <td class="whitespace-nowrap px-4 py-3 tabular-nums">{{ elapsed(task) }}</td>
                 <td v-for="field in statusFields" :key="field" class="whitespace-nowrap px-4 py-3">
-                  <span class="badge" :class="badgeFor(task[field])">{{ statusLabel(task[field]) }}</span>
+                  <span class="badge" :class="badgeFor(task[field])">{{ field === 'status' && task.queue_position != null ? t('videoTasks.queuedAhead', { count: task.queue_position }) : statusLabel(task[field]) }}</span>
                 </td>
                 <td class="whitespace-nowrap px-4 py-3 tabular-nums">
                   <span v-if="task.cost == null" class="text-gray-400">-</span>
@@ -191,6 +193,18 @@ async function downloadVideo(task: VideoTask) {
   } finally {
     downloadingId.value = ''
   }
+}
+
+function elapsed(task: VideoTask) {
+  if (!task.finished_at && !hasActiveState(task)) return '—'
+  const end = task.finished_at ? Date.parse(task.finished_at) : Date.now()
+  const seconds = Math.floor((end - Date.parse(task.created_at)) / 1000)
+  if (!Number.isFinite(seconds) || seconds < 0) return '—'
+  return t('videoTasks.elapsedValue', { minutes: Math.floor(seconds / 60), seconds: seconds % 60 })
+}
+
+function hasActiveState(task: VideoTask) {
+  return task.billing_status === 'pending' && ['submitting', 'pending', 'completed'].includes(task.status)
 }
 
 function statusLabel(status: string) {
