@@ -240,3 +240,17 @@ func (h *OpenAIGatewayHandler) h3OwnedTask(c *gin.Context) (*service.H3Task, boo
 	}
 	return task, true
 }
+
+func (h *OpenAIGatewayHandler) MiniMaxH3Nodes(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	if h.h3 == nil {
+		response.Error(c, 503, "H3 monitor unavailable")
+		return
+	}
+	nodes, err := h.h3.NodeStatus(c.Request.Context())
+	if err != nil {
+		response.Error(c, 503, "H3 monitor unavailable")
+		return
+	}
+	response.Success(c, nodes)
+}

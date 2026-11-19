@@ -560,6 +560,11 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/h3-status', name: 'AdminH3Status',
+    component: () => import('@/views/admin/H3StatusView.vue'),
+    meta: { requiresAuth: true, requiresAdmin: true, title: 'MiniMax H3 状态' }
+  },
+  {
     path: '/admin/accounts',
     name: 'AdminAccounts',
     component: () => import('@/views/admin/AccountsView.vue'),
