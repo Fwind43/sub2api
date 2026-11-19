@@ -11,11 +11,17 @@ import (
 )
 
 type H3NodeHealth struct {
-	OK       *bool  `json:"ok"`
-	Upstream *bool  `json:"upstream"`
-	GPU      string `json:"gpu"`
-	Active   *int   `json:"active_jobs"`
-	Capacity *int   `json:"max_queue"`
+	OK         *bool  `json:"ok"`
+	Upstream   *bool  `json:"upstream"`
+	GPU        string `json:"gpu"`
+	Active     *int   `json:"active_jobs"`
+	Capacity   *int   `json:"max_queue"`
+	Accepting  *bool  `json:"accepting"`
+	Computing  *int   `json:"computing"`
+	Waiting    *int   `json:"queued"`
+	Collecting *int   `json:"collecting"`
+	Stale      bool   `json:"stale"`
+	ObservedAt string `json:"observed_at"`
 }
 type H3NodeStatus struct {
 	ID      int64         `json:"id"`
@@ -58,28 +64,35 @@ func (s *H3Service) probeH3Node(ctx context.Context, id int64) *H3NodeHealth {
 	if err != nil || base.Scheme != "https" || base.Host == "" || base.User != nil || base.RawQuery != "" || base.Fragment != "" {
 		return nil
 	}
-	base.Path = strings.TrimSuffix(strings.TrimRight(base.Path, "/"), "/v1") + "/healthz"
-	base.RawPath = ""
-	req, err := http.NewRequestWithContext(WithHTTPUpstreamRedirectsDisabled(ctx), http.MethodGet, base.String(), nil)
-	if err != nil {
-		return nil
+	root := strings.TrimSuffix(strings.TrimRight(base.Path, "/"), "/v1")
+	probe := func(path string) *H3NodeHealth {
+		base.Path = root + path
+		base.RawPath = ""
+		req, err := http.NewRequestWithContext(WithHTTPUpstreamRedirectsDisabled(ctx), http.MethodGet, base.String(), nil)
+		if err != nil {
+			return nil
+		}
+		req.Header.Set("Authorization", "Bearer "+a.GetCredential("api_key"))
+		proxy := ""
+		if a.Proxy != nil {
+			proxy = a.Proxy.URL()
+		}
+		res, err := s.gateway.httpUpstream.Do(req, proxy, a.ID, a.Concurrency)
+		if err != nil {
+			return nil
+		}
+		defer res.Body.Close()
+		if res.StatusCode != 200 {
+			return nil
+		}
+		var health H3NodeHealth
+		if err := json.NewDecoder(io.LimitReader(res.Body, 65536)).Decode(&health); err != nil || (health.OK == nil && health.Accepting == nil) {
+			return nil
+		}
+		return &health
 	}
-	req.Header.Set("Authorization", "Bearer "+a.GetCredential("api_key"))
-	proxy := ""
-	if a.Proxy != nil {
-		proxy = a.Proxy.URL()
+	if health := probe("/healthz"); health != nil {
+		return health
 	}
-	res, err := s.gateway.httpUpstream.Do(req, proxy, a.ID, a.Concurrency)
-	if err != nil {
-		return nil
-	}
-	defer res.Body.Close()
-	if res.StatusCode != 200 {
-		return nil
-	}
-	var health H3NodeHealth
-	if err := json.NewDecoder(io.LimitReader(res.Body, 8192)).Decode(&health); err != nil || health.OK == nil {
-		return nil
-	}
-	return &health
+	return probe("/h3/status")
 }
