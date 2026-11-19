@@ -448,6 +448,8 @@ export default {
         affiliateRebateRate: 'Affiliate Rebate Rate',
         affiliateRebateRateHint:
           'Rebate percentage credited to inviter after recharge (0-100%, e.g. 10 means 10%)',
+        h3UserLimit: 'H3 active videos per user',
+        h3UserLimitHint: 'Counts submitting, queued, and generating tasks across all API keys for each user. Set to 0 for unlimited.',
         defaultConcurrency: 'Default Concurrency',
         defaultConcurrencyHint: 'Maximum concurrent requests for new users',
         defaultUserRpmLimit: 'Default User RPM Limit',

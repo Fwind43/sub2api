@@ -386,6 +386,10 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 		result.SMTPPort = 587
 	}
 
+	result.H3MaxActiveTasksPerUser = s.cfg.Gateway.H3MaxActiveTasksPerUser
+	if n, err := strconv.Atoi(settings[SettingKeyH3MaxActiveTasksPerUser]); err == nil && n >= 0 {
+		result.H3MaxActiveTasksPerUser = n
+	}
 	if concurrency, err := strconv.Atoi(settings[SettingKeyDefaultConcurrency]); err == nil {
 		result.DefaultConcurrency = concurrency
 	} else {

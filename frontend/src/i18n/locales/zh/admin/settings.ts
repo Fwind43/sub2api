@@ -444,6 +444,8 @@ export default {
         defaultBalanceHint: '新用户的初始余额',
         affiliateRebateRate: '邀请返利比例',
         affiliateRebateRateHint: '充值后返给邀请人的比例（0-100%，例如填写 10 表示返利 10%）',
+        h3UserLimit: 'H3 视频每用户并发上限',
+        h3UserLimitHint: '提交中、排队中和生成中的任务合计占用名额。同一用户的所有 API Key 共用上限。0 表示不限。',
         defaultConcurrency: '默认并发数',
         defaultConcurrencyHint: '新用户的最大并发请求数',
         defaultUserRpmLimit: '默认用户 RPM 限制',

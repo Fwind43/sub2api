@@ -309,6 +309,10 @@ func (s *H3Service) Create(ctx context.Context, key *APIKey, sub *UserSubscripti
 	if s.gateway.cfg != nil {
 		limit = s.gateway.cfg.Gateway.H3MaxActiveTasksPerUser
 	}
+	err = tx.QueryRowContext(ctx, `SELECT value::bigint FROM settings WHERE key=$1`, SettingKeyH3MaxActiveTasksPerUser).Scan(&limit)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
 	if limit > 0 {
 		// Serialize admission across replicas, but never hold the lock during submission.
 		if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('h3:user:' || $1::bigint::text,0))`, key.UserID); err != nil {
