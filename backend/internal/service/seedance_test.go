@@ -58,7 +58,13 @@ func TestSeedanceStatusAndDelete(t *testing.T) {
 			} else {
 				require.Zero(t, result.Usage.OutputTokens)
 			}
-			require.Zero(t, result.VideoCount, "must use token billing, not Grok seconds")
+			// VideoCount is only a success marker; the handler resets it to 0 (token
+			// billing) unless the group configures a per-second video price.
+			if status == "succeeded" {
+				require.Equal(t, 1, result.VideoCount)
+			} else {
+				require.Zero(t, result.VideoCount)
+			}
 		})
 	}
 	upstream := &grokMediaContentUpstreamStub{response: grokMediaContentStatusResponse("")}

@@ -128,7 +128,7 @@ func TestH3HTTP503KeepsSubmissionUnknownWithTrace(t *testing.T) {
 	if err == nil || len(body) != 0 || len(transport.requests) != 1 {
 		t.Fatal("a 503 must not be retried or return its response body")
 	}
-	if want := (h3RequestDiagnostics{status: 503, failure: "upstream_http", requestID: "req-provider-503", cfRay: "123abc-SIN"}); diag != want {
+	if want := (h3RequestDiagnostics{status: 503, failure: "upstream_http", requestID: "req-provider-503", cfRay: "123abc-SIN", upstreamError: `{"id":"not-a-receipt"}`}); diag != want {
 		t.Fatalf("got diagnostics %+v, want %+v", diag, want)
 	}
 	if id, generation, billing := h3SubmissionOutcome(body, err); id != "" || generation != "submission_unknown" || billing != "pending" {
