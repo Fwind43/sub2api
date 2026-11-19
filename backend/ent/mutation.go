@@ -49152,6 +49152,8 @@ type UserMutation struct {
 	balance_notify_extra_emails   *string
 	total_recharged               *float64
 	addtotal_recharged            *float64
+	h3_task_limit                 *int
+	addh3_task_limit              *int
 	rpm_limit                     *int
 	addrpm_limit                  *int
 	clearedFields                 map[string]struct{}
@@ -50340,6 +50342,76 @@ func (m *UserMutation) ResetTotalRecharged() {
 	m.addtotal_recharged = nil
 }
 
+// SetH3TaskLimit sets the "h3_task_limit" field.
+func (m *UserMutation) SetH3TaskLimit(i int) {
+	m.h3_task_limit = &i
+	m.addh3_task_limit = nil
+}
+
+// H3TaskLimit returns the value of the "h3_task_limit" field in the mutation.
+func (m *UserMutation) H3TaskLimit() (r int, exists bool) {
+	v := m.h3_task_limit
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldH3TaskLimit returns the old "h3_task_limit" field's value of the User entity.
+// If the User object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserMutation) OldH3TaskLimit(ctx context.Context) (v *int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldH3TaskLimit is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldH3TaskLimit requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldH3TaskLimit: %w", err)
+	}
+	return oldValue.H3TaskLimit, nil
+}
+
+// AddH3TaskLimit adds i to the "h3_task_limit" field.
+func (m *UserMutation) AddH3TaskLimit(i int) {
+	if m.addh3_task_limit != nil {
+		*m.addh3_task_limit += i
+	} else {
+		m.addh3_task_limit = &i
+	}
+}
+
+// AddedH3TaskLimit returns the value that was added to the "h3_task_limit" field in this mutation.
+func (m *UserMutation) AddedH3TaskLimit() (r int, exists bool) {
+	v := m.addh3_task_limit
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearH3TaskLimit clears the value of the "h3_task_limit" field.
+func (m *UserMutation) ClearH3TaskLimit() {
+	m.h3_task_limit = nil
+	m.addh3_task_limit = nil
+	m.clearedFields[user.FieldH3TaskLimit] = struct{}{}
+}
+
+// H3TaskLimitCleared returns if the "h3_task_limit" field was cleared in this mutation.
+func (m *UserMutation) H3TaskLimitCleared() bool {
+	_, ok := m.clearedFields[user.FieldH3TaskLimit]
+	return ok
+}
+
+// ResetH3TaskLimit resets all changes to the "h3_task_limit" field.
+func (m *UserMutation) ResetH3TaskLimit() {
+	m.h3_task_limit = nil
+	m.addh3_task_limit = nil
+	delete(m.clearedFields, user.FieldH3TaskLimit)
+}
+
 // SetRpmLimit sets the "rpm_limit" field.
 func (m *UserMutation) SetRpmLimit(i int) {
 	m.rpm_limit = &i
@@ -51132,7 +51204,7 @@ func (m *UserMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UserMutation) Fields() []string {
-	fields := make([]string, 0, 25)
+	fields := make([]string, 0, 26)
 	if m.created_at != nil {
 		fields = append(fields, user.FieldCreatedAt)
 	}
@@ -51205,6 +51277,9 @@ func (m *UserMutation) Fields() []string {
 	if m.total_recharged != nil {
 		fields = append(fields, user.FieldTotalRecharged)
 	}
+	if m.h3_task_limit != nil {
+		fields = append(fields, user.FieldH3TaskLimit)
+	}
 	if m.rpm_limit != nil {
 		fields = append(fields, user.FieldRpmLimit)
 	}
@@ -51264,6 +51339,8 @@ func (m *UserMutation) Field(name string) (ent.Value, bool) {
 		return m.BalanceNotifyExtraEmails()
 	case user.FieldTotalRecharged:
 		return m.TotalRecharged()
+	case user.FieldH3TaskLimit:
+		return m.H3TaskLimit()
 	case user.FieldRpmLimit:
 		return m.RpmLimit()
 	}
@@ -51323,6 +51400,8 @@ func (m *UserMutation) OldField(ctx context.Context, name string) (ent.Value, er
 		return m.OldBalanceNotifyExtraEmails(ctx)
 	case user.FieldTotalRecharged:
 		return m.OldTotalRecharged(ctx)
+	case user.FieldH3TaskLimit:
+		return m.OldH3TaskLimit(ctx)
 	case user.FieldRpmLimit:
 		return m.OldRpmLimit(ctx)
 	}
@@ -51502,6 +51581,13 @@ func (m *UserMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetTotalRecharged(v)
 		return nil
+	case user.FieldH3TaskLimit:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetH3TaskLimit(v)
+		return nil
 	case user.FieldRpmLimit:
 		v, ok := value.(int)
 		if !ok {
@@ -51532,6 +51618,9 @@ func (m *UserMutation) AddedFields() []string {
 	if m.addtotal_recharged != nil {
 		fields = append(fields, user.FieldTotalRecharged)
 	}
+	if m.addh3_task_limit != nil {
+		fields = append(fields, user.FieldH3TaskLimit)
+	}
 	if m.addrpm_limit != nil {
 		fields = append(fields, user.FieldRpmLimit)
 	}
@@ -51553,6 +51642,8 @@ func (m *UserMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedBalanceNotifyThreshold()
 	case user.FieldTotalRecharged:
 		return m.AddedTotalRecharged()
+	case user.FieldH3TaskLimit:
+		return m.AddedH3TaskLimit()
 	case user.FieldRpmLimit:
 		return m.AddedRpmLimit()
 	}
@@ -51599,6 +51690,13 @@ func (m *UserMutation) AddField(name string, value ent.Value) error {
 		}
 		m.AddTotalRecharged(v)
 		return nil
+	case user.FieldH3TaskLimit:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddH3TaskLimit(v)
+		return nil
 	case user.FieldRpmLimit:
 		v, ok := value.(int)
 		if !ok {
@@ -51632,6 +51730,9 @@ func (m *UserMutation) ClearedFields() []string {
 	if m.FieldCleared(user.FieldBalanceNotifyThreshold) {
 		fields = append(fields, user.FieldBalanceNotifyThreshold)
 	}
+	if m.FieldCleared(user.FieldH3TaskLimit) {
+		fields = append(fields, user.FieldH3TaskLimit)
+	}
 	return fields
 }
 
@@ -51663,6 +51764,9 @@ func (m *UserMutation) ClearField(name string) error {
 		return nil
 	case user.FieldBalanceNotifyThreshold:
 		m.ClearBalanceNotifyThreshold()
+		return nil
+	case user.FieldH3TaskLimit:
+		m.ClearH3TaskLimit()
 		return nil
 	}
 	return fmt.Errorf("unknown User nullable field %s", name)
@@ -51743,6 +51847,9 @@ func (m *UserMutation) ResetField(name string) error {
 		return nil
 	case user.FieldTotalRecharged:
 		m.ResetTotalRecharged()
+		return nil
+	case user.FieldH3TaskLimit:
+		m.ResetH3TaskLimit()
 		return nil
 	case user.FieldRpmLimit:
 		m.ResetRpmLimit()

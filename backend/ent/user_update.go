@@ -425,6 +425,33 @@ func (_u *UserUpdate) AddTotalRecharged(v float64) *UserUpdate {
 	return _u
 }
 
+// SetH3TaskLimit sets the "h3_task_limit" field.
+func (_u *UserUpdate) SetH3TaskLimit(v int) *UserUpdate {
+	_u.mutation.ResetH3TaskLimit()
+	_u.mutation.SetH3TaskLimit(v)
+	return _u
+}
+
+// SetNillableH3TaskLimit sets the "h3_task_limit" field if the given value is not nil.
+func (_u *UserUpdate) SetNillableH3TaskLimit(v *int) *UserUpdate {
+	if v != nil {
+		_u.SetH3TaskLimit(*v)
+	}
+	return _u
+}
+
+// AddH3TaskLimit adds value to the "h3_task_limit" field.
+func (_u *UserUpdate) AddH3TaskLimit(v int) *UserUpdate {
+	_u.mutation.AddH3TaskLimit(v)
+	return _u
+}
+
+// ClearH3TaskLimit clears the value of the "h3_task_limit" field.
+func (_u *UserUpdate) ClearH3TaskLimit() *UserUpdate {
+	_u.mutation.ClearH3TaskLimit()
+	return _u
+}
+
 // SetRpmLimit sets the "rpm_limit" field.
 func (_u *UserUpdate) SetRpmLimit(v int) *UserUpdate {
 	_u.mutation.ResetRpmLimit()
@@ -993,6 +1020,11 @@ func (_u *UserUpdate) check() error {
 			return &ValidationError{Name: "signup_source", err: fmt.Errorf(`ent: validator failed for field "User.signup_source": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.H3TaskLimit(); ok {
+		if err := user.H3TaskLimitValidator(v); err != nil {
+			return &ValidationError{Name: "h3_task_limit", err: fmt.Errorf(`ent: validator failed for field "User.h3_task_limit": %w`, err)}
+		}
+	}
 	return nil
 }
 
@@ -1109,6 +1141,15 @@ func (_u *UserUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.AddedTotalRecharged(); ok {
 		_spec.AddField(user.FieldTotalRecharged, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.H3TaskLimit(); ok {
+		_spec.SetField(user.FieldH3TaskLimit, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedH3TaskLimit(); ok {
+		_spec.AddField(user.FieldH3TaskLimit, field.TypeInt, value)
+	}
+	if _u.mutation.H3TaskLimitCleared() {
+		_spec.ClearField(user.FieldH3TaskLimit, field.TypeInt)
 	}
 	if value, ok := _u.mutation.RpmLimit(); ok {
 		_spec.SetField(user.FieldRpmLimit, field.TypeInt, value)
@@ -2118,6 +2159,33 @@ func (_u *UserUpdateOne) AddTotalRecharged(v float64) *UserUpdateOne {
 	return _u
 }
 
+// SetH3TaskLimit sets the "h3_task_limit" field.
+func (_u *UserUpdateOne) SetH3TaskLimit(v int) *UserUpdateOne {
+	_u.mutation.ResetH3TaskLimit()
+	_u.mutation.SetH3TaskLimit(v)
+	return _u
+}
+
+// SetNillableH3TaskLimit sets the "h3_task_limit" field if the given value is not nil.
+func (_u *UserUpdateOne) SetNillableH3TaskLimit(v *int) *UserUpdateOne {
+	if v != nil {
+		_u.SetH3TaskLimit(*v)
+	}
+	return _u
+}
+
+// AddH3TaskLimit adds value to the "h3_task_limit" field.
+func (_u *UserUpdateOne) AddH3TaskLimit(v int) *UserUpdateOne {
+	_u.mutation.AddH3TaskLimit(v)
+	return _u
+}
+
+// ClearH3TaskLimit clears the value of the "h3_task_limit" field.
+func (_u *UserUpdateOne) ClearH3TaskLimit() *UserUpdateOne {
+	_u.mutation.ClearH3TaskLimit()
+	return _u
+}
+
 // SetRpmLimit sets the "rpm_limit" field.
 func (_u *UserUpdateOne) SetRpmLimit(v int) *UserUpdateOne {
 	_u.mutation.ResetRpmLimit()
@@ -2699,6 +2767,11 @@ func (_u *UserUpdateOne) check() error {
 			return &ValidationError{Name: "signup_source", err: fmt.Errorf(`ent: validator failed for field "User.signup_source": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.H3TaskLimit(); ok {
+		if err := user.H3TaskLimitValidator(v); err != nil {
+			return &ValidationError{Name: "h3_task_limit", err: fmt.Errorf(`ent: validator failed for field "User.h3_task_limit": %w`, err)}
+		}
+	}
 	return nil
 }
 
@@ -2832,6 +2905,15 @@ func (_u *UserUpdateOne) sqlSave(ctx context.Context) (_node *User, err error) {
 	}
 	if value, ok := _u.mutation.AddedTotalRecharged(); ok {
 		_spec.AddField(user.FieldTotalRecharged, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.H3TaskLimit(); ok {
+		_spec.SetField(user.FieldH3TaskLimit, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedH3TaskLimit(); ok {
+		_spec.AddField(user.FieldH3TaskLimit, field.TypeInt, value)
+	}
+	if _u.mutation.H3TaskLimitCleared() {
+		_spec.ClearField(user.FieldH3TaskLimit, field.TypeInt)
 	}
 	if value, ok := _u.mutation.RpmLimit(); ok {
 		_spec.SetField(user.FieldRpmLimit, field.TypeInt, value)

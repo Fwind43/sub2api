@@ -175,6 +175,11 @@ func TotalRecharged(v float64) predicate.User {
 	return predicate.User(sql.FieldEQ(FieldTotalRecharged, v))
 }
 
+// H3TaskLimit applies equality check predicate on the "h3_task_limit" field. It's identical to H3TaskLimitEQ.
+func H3TaskLimit(v int) predicate.User {
+	return predicate.User(sql.FieldEQ(FieldH3TaskLimit, v))
+}
+
 // RpmLimit applies equality check predicate on the "rpm_limit" field. It's identical to RpmLimitEQ.
 func RpmLimit(v int) predicate.User {
 	return predicate.User(sql.FieldEQ(FieldRpmLimit, v))
@@ -1358,6 +1363,56 @@ func TotalRechargedLT(v float64) predicate.User {
 // TotalRechargedLTE applies the LTE predicate on the "total_recharged" field.
 func TotalRechargedLTE(v float64) predicate.User {
 	return predicate.User(sql.FieldLTE(FieldTotalRecharged, v))
+}
+
+// H3TaskLimitEQ applies the EQ predicate on the "h3_task_limit" field.
+func H3TaskLimitEQ(v int) predicate.User {
+	return predicate.User(sql.FieldEQ(FieldH3TaskLimit, v))
+}
+
+// H3TaskLimitNEQ applies the NEQ predicate on the "h3_task_limit" field.
+func H3TaskLimitNEQ(v int) predicate.User {
+	return predicate.User(sql.FieldNEQ(FieldH3TaskLimit, v))
+}
+
+// H3TaskLimitIn applies the In predicate on the "h3_task_limit" field.
+func H3TaskLimitIn(vs ...int) predicate.User {
+	return predicate.User(sql.FieldIn(FieldH3TaskLimit, vs...))
+}
+
+// H3TaskLimitNotIn applies the NotIn predicate on the "h3_task_limit" field.
+func H3TaskLimitNotIn(vs ...int) predicate.User {
+	return predicate.User(sql.FieldNotIn(FieldH3TaskLimit, vs...))
+}
+
+// H3TaskLimitGT applies the GT predicate on the "h3_task_limit" field.
+func H3TaskLimitGT(v int) predicate.User {
+	return predicate.User(sql.FieldGT(FieldH3TaskLimit, v))
+}
+
+// H3TaskLimitGTE applies the GTE predicate on the "h3_task_limit" field.
+func H3TaskLimitGTE(v int) predicate.User {
+	return predicate.User(sql.FieldGTE(FieldH3TaskLimit, v))
+}
+
+// H3TaskLimitLT applies the LT predicate on the "h3_task_limit" field.
+func H3TaskLimitLT(v int) predicate.User {
+	return predicate.User(sql.FieldLT(FieldH3TaskLimit, v))
+}
+
+// H3TaskLimitLTE applies the LTE predicate on the "h3_task_limit" field.
+func H3TaskLimitLTE(v int) predicate.User {
+	return predicate.User(sql.FieldLTE(FieldH3TaskLimit, v))
+}
+
+// H3TaskLimitIsNil applies the IsNil predicate on the "h3_task_limit" field.
+func H3TaskLimitIsNil() predicate.User {
+	return predicate.User(sql.FieldIsNull(FieldH3TaskLimit))
+}
+
+// H3TaskLimitNotNil applies the NotNil predicate on the "h3_task_limit" field.
+func H3TaskLimitNotNil() predicate.User {
+	return predicate.User(sql.FieldNotNull(FieldH3TaskLimit))
 }
 
 // RpmLimitEQ applies the EQ predicate on the "rpm_limit" field.

@@ -63,6 +63,8 @@ const (
 	FieldBalanceNotifyExtraEmails = "balance_notify_extra_emails"
 	// FieldTotalRecharged holds the string denoting the total_recharged field in the database.
 	FieldTotalRecharged = "total_recharged"
+	// FieldH3TaskLimit holds the string denoting the h3_task_limit field in the database.
+	FieldH3TaskLimit = "h3_task_limit"
 	// FieldRpmLimit holds the string denoting the rpm_limit field in the database.
 	FieldRpmLimit = "rpm_limit"
 	// EdgeAPIKeys holds the string denoting the api_keys edge name in mutations.
@@ -220,6 +222,7 @@ var Columns = []string{
 	FieldBalanceNotifyThreshold,
 	FieldBalanceNotifyExtraEmails,
 	FieldTotalRecharged,
+	FieldH3TaskLimit,
 	FieldRpmLimit,
 }
 
@@ -293,6 +296,8 @@ var (
 	DefaultBalanceNotifyExtraEmails string
 	// DefaultTotalRecharged holds the default value on creation for the "total_recharged" field.
 	DefaultTotalRecharged float64
+	// H3TaskLimitValidator is a validator for the "h3_task_limit" field. It is called by the builders before save.
+	H3TaskLimitValidator func(int) error
 	// DefaultRpmLimit holds the default value on creation for the "rpm_limit" field.
 	DefaultRpmLimit int
 )
@@ -423,6 +428,11 @@ func ByBalanceNotifyExtraEmails(opts ...sql.OrderTermOption) OrderOption {
 // ByTotalRecharged orders the results by the total_recharged field.
 func ByTotalRecharged(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldTotalRecharged, opts...).ToFunc()
+}
+
+// ByH3TaskLimit orders the results by the h3_task_limit field.
+func ByH3TaskLimit(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldH3TaskLimit, opts...).ToFunc()
 }
 
 // ByRpmLimit orders the results by the rpm_limit field.

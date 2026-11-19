@@ -311,6 +311,13 @@ func (r *userRepository) Update(ctx context.Context, userIn *service.User, field
 	if fields.Concurrency {
 		updateOp = updateOp.SetConcurrency(userIn.Concurrency)
 	}
+	if fields.H3TaskLimit {
+		if userIn.H3TaskLimit == nil {
+			updateOp.ClearH3TaskLimit()
+		} else {
+			updateOp.SetH3TaskLimit(*userIn.H3TaskLimit)
+		}
+	}
 	if fields.RPMLimit {
 		updateOp = updateOp.SetRpmLimit(userIn.RPMLimit)
 	}

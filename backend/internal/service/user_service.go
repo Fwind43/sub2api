@@ -102,6 +102,7 @@ type UserUpdateFields struct {
 	Role         bool
 	Status       bool
 	Concurrency  bool
+	H3TaskLimit  bool
 	RPMLimit     bool
 	SignupSource bool
 	LastLoginAt  bool

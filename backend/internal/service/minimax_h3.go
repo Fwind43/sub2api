@@ -309,7 +309,7 @@ func (s *H3Service) Create(ctx context.Context, key *APIKey, sub *UserSubscripti
 	if s.gateway.cfg != nil {
 		limit = s.gateway.cfg.Gateway.H3MaxActiveTasksPerUser
 	}
-	err = tx.QueryRowContext(ctx, `SELECT value::bigint FROM settings WHERE key=$1`, SettingKeyH3MaxActiveTasksPerUser).Scan(&limit)
+	err = tx.QueryRowContext(ctx, `SELECT COALESCE(u.h3_task_limit, (SELECT value::bigint FROM settings WHERE key=$1), $3::bigint) FROM users u WHERE u.id=$2`, SettingKeyH3MaxActiveTasksPerUser, key.UserID, limit).Scan(&limit)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}

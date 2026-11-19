@@ -354,6 +354,20 @@ func (_c *UserCreate) SetNillableTotalRecharged(v *float64) *UserCreate {
 	return _c
 }
 
+// SetH3TaskLimit sets the "h3_task_limit" field.
+func (_c *UserCreate) SetH3TaskLimit(v int) *UserCreate {
+	_c.mutation.SetH3TaskLimit(v)
+	return _c
+}
+
+// SetNillableH3TaskLimit sets the "h3_task_limit" field if the given value is not nil.
+func (_c *UserCreate) SetNillableH3TaskLimit(v *int) *UserCreate {
+	if v != nil {
+		_c.SetH3TaskLimit(*v)
+	}
+	return _c
+}
+
 // SetRpmLimit sets the "rpm_limit" field.
 func (_c *UserCreate) SetRpmLimit(v int) *UserCreate {
 	_c.mutation.SetRpmLimit(v)
@@ -763,6 +777,11 @@ func (_c *UserCreate) check() error {
 	if _, ok := _c.mutation.TotalRecharged(); !ok {
 		return &ValidationError{Name: "total_recharged", err: errors.New(`ent: missing required field "User.total_recharged"`)}
 	}
+	if v, ok := _c.mutation.H3TaskLimit(); ok {
+		if err := user.H3TaskLimitValidator(v); err != nil {
+			return &ValidationError{Name: "h3_task_limit", err: fmt.Errorf(`ent: validator failed for field "User.h3_task_limit": %w`, err)}
+		}
+	}
 	if _, ok := _c.mutation.RpmLimit(); !ok {
 		return &ValidationError{Name: "rpm_limit", err: errors.New(`ent: missing required field "User.rpm_limit"`)}
 	}
@@ -888,6 +907,10 @@ func (_c *UserCreate) createSpec() (*User, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.TotalRecharged(); ok {
 		_spec.SetField(user.FieldTotalRecharged, field.TypeFloat64, value)
 		_node.TotalRecharged = value
+	}
+	if value, ok := _c.mutation.H3TaskLimit(); ok {
+		_spec.SetField(user.FieldH3TaskLimit, field.TypeInt, value)
+		_node.H3TaskLimit = &value
 	}
 	if value, ok := _c.mutation.RpmLimit(); ok {
 		_spec.SetField(user.FieldRpmLimit, field.TypeInt, value)
@@ -1499,6 +1522,30 @@ func (u *UserUpsert) AddTotalRecharged(v float64) *UserUpsert {
 	return u
 }
 
+// SetH3TaskLimit sets the "h3_task_limit" field.
+func (u *UserUpsert) SetH3TaskLimit(v int) *UserUpsert {
+	u.Set(user.FieldH3TaskLimit, v)
+	return u
+}
+
+// UpdateH3TaskLimit sets the "h3_task_limit" field to the value that was provided on create.
+func (u *UserUpsert) UpdateH3TaskLimit() *UserUpsert {
+	u.SetExcluded(user.FieldH3TaskLimit)
+	return u
+}
+
+// AddH3TaskLimit adds v to the "h3_task_limit" field.
+func (u *UserUpsert) AddH3TaskLimit(v int) *UserUpsert {
+	u.Add(user.FieldH3TaskLimit, v)
+	return u
+}
+
+// ClearH3TaskLimit clears the value of the "h3_task_limit" field.
+func (u *UserUpsert) ClearH3TaskLimit() *UserUpsert {
+	u.SetNull(user.FieldH3TaskLimit)
+	return u
+}
+
 // SetRpmLimit sets the "rpm_limit" field.
 func (u *UserUpsert) SetRpmLimit(v int) *UserUpsert {
 	u.Set(user.FieldRpmLimit, v)
@@ -1958,6 +2005,34 @@ func (u *UserUpsertOne) AddTotalRecharged(v float64) *UserUpsertOne {
 func (u *UserUpsertOne) UpdateTotalRecharged() *UserUpsertOne {
 	return u.Update(func(s *UserUpsert) {
 		s.UpdateTotalRecharged()
+	})
+}
+
+// SetH3TaskLimit sets the "h3_task_limit" field.
+func (u *UserUpsertOne) SetH3TaskLimit(v int) *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.SetH3TaskLimit(v)
+	})
+}
+
+// AddH3TaskLimit adds v to the "h3_task_limit" field.
+func (u *UserUpsertOne) AddH3TaskLimit(v int) *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.AddH3TaskLimit(v)
+	})
+}
+
+// UpdateH3TaskLimit sets the "h3_task_limit" field to the value that was provided on create.
+func (u *UserUpsertOne) UpdateH3TaskLimit() *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.UpdateH3TaskLimit()
+	})
+}
+
+// ClearH3TaskLimit clears the value of the "h3_task_limit" field.
+func (u *UserUpsertOne) ClearH3TaskLimit() *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.ClearH3TaskLimit()
 	})
 }
 
@@ -2589,6 +2664,34 @@ func (u *UserUpsertBulk) AddTotalRecharged(v float64) *UserUpsertBulk {
 func (u *UserUpsertBulk) UpdateTotalRecharged() *UserUpsertBulk {
 	return u.Update(func(s *UserUpsert) {
 		s.UpdateTotalRecharged()
+	})
+}
+
+// SetH3TaskLimit sets the "h3_task_limit" field.
+func (u *UserUpsertBulk) SetH3TaskLimit(v int) *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.SetH3TaskLimit(v)
+	})
+}
+
+// AddH3TaskLimit adds v to the "h3_task_limit" field.
+func (u *UserUpsertBulk) AddH3TaskLimit(v int) *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.AddH3TaskLimit(v)
+	})
+}
+
+// UpdateH3TaskLimit sets the "h3_task_limit" field to the value that was provided on create.
+func (u *UserUpsertBulk) UpdateH3TaskLimit() *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.UpdateH3TaskLimit()
+	})
+}
+
+// ClearH3TaskLimit clears the value of the "h3_task_limit" field.
+func (u *UserUpsertBulk) ClearH3TaskLimit() *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.ClearH3TaskLimit()
 	})
 }
 

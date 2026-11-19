@@ -186,6 +186,7 @@ type UpdateUserInput struct {
 	Role          string   // 空字符串表示"未提供"(不修改);合法值 admin/user
 	Balance       *float64 // 使用指针区分"未提供"和"设置为0"
 	Concurrency   *int     // 使用指针区分"未提供"和"设置为0"
+	H3TaskLimit   *int     // -1 clears the user override.
 	RPMLimit      *int     // 使用指针区分"未提供"和"设置为0"
 	Status        string
 	AllowedGroups *[]int64 // 使用指针区分"未提供"和"设置为空数组"

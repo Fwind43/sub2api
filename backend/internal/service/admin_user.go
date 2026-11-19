@@ -271,6 +271,13 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 		fields.Concurrency = true
 	}
 
+	if input.H3TaskLimit != nil {
+		user.H3TaskLimit = input.H3TaskLimit
+		if *input.H3TaskLimit == -1 {
+			user.H3TaskLimit = nil
+		}
+		fields.H3TaskLimit = true
+	}
 	if input.RPMLimit != nil {
 		user.RPMLimit = *input.RPMLimit
 		fields.RPMLimit = true

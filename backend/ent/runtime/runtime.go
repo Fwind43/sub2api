@@ -2293,8 +2293,12 @@ func init() {
 	userDescTotalRecharged := userFields[20].Descriptor()
 	// user.DefaultTotalRecharged holds the default value on creation for the total_recharged field.
 	user.DefaultTotalRecharged = userDescTotalRecharged.Default.(float64)
+	// userDescH3TaskLimit is the schema descriptor for h3_task_limit field.
+	userDescH3TaskLimit := userFields[21].Descriptor()
+	// user.H3TaskLimitValidator is a validator for the "h3_task_limit" field. It is called by the builders before save.
+	user.H3TaskLimitValidator = userDescH3TaskLimit.Validators[0].(func(int) error)
 	// userDescRpmLimit is the schema descriptor for rpm_limit field.
-	userDescRpmLimit := userFields[21].Descriptor()
+	userDescRpmLimit := userFields[22].Descriptor()
 	// user.DefaultRpmLimit holds the default value on creation for the rpm_limit field.
 	user.DefaultRpmLimit = userDescRpmLimit.Default.(int)
 	userallowedgroupFields := schema.UserAllowedGroup{}.Fields()

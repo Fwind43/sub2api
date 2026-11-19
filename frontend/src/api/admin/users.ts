@@ -49,6 +49,7 @@ export interface BatchUpdateUserLimitsRequest {
   user_ids: number[]
   all?: boolean
   concurrency?: number
+  h3_task_limit?: number
   rpm_limit?: number
 }
 
