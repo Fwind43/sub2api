@@ -19,6 +19,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/google/uuid"
@@ -364,8 +366,8 @@ func (s *H3Service) submit(ctx context.Context, id string, account *Account, bod
 	}
 	// The receipt ID is distinct from HTTP tracing IDs. Keep it available for
 	// reconciliation even when the database is temporarily unavailable.
-	log.Printf("H3 submission task=%s state=%s account_id=%d upstream_http_status=%d failure=%q elapsed_ms=%d upstream_task_id=%q upstream_request_id=%q upstream_cf_ray=%q",
-		id, state, account.ID, diag.status, diag.failure, time.Since(start).Milliseconds(), upstream, diag.requestID, diag.cfRay)
+	log.Printf("H3 submission task=%s state=%s account_id=%d upstream_http_status=%d failure=%q elapsed_ms=%d upstream_task_id=%q upstream_request_id=%q upstream_cf_ray=%q upstream_error=%q",
+		id, state, account.ID, diag.status, diag.failure, time.Since(start).Milliseconds(), upstream, diag.requestID, diag.cfRay, diag.upstreamError)
 	s.saveSubmissionOutcome(id, upstream, state, billing)
 }
 
@@ -456,6 +458,53 @@ func validH3UpstreamID(id string) bool {
 type h3RequestDiagnostics struct {
 	status                    int
 	failure, requestID, cfRay string
+	// upstreamError is a short, sanitized excerpt of a non-2xx response body
+	// (for example the reason behind a 422) so rejections can be diagnosed.
+	upstreamError string
+}
+
+const (
+	h3UpstreamErrorReadLimit = 4 << 10
+	h3UpstreamErrorMaxRunes  = 300
+)
+
+// h3UpstreamErrorSummary extracts a readable reason from an error body.
+// Common JSON shapes ({"error":"..."}, {"error":{"message":"..."}},
+// {"message":"..."}, {"detail":"..."}) are reduced to their message; other
+// bodies are kept as text. Control characters are flattened and the result is
+// truncated so a large or hostile body cannot flood the log.
+func h3UpstreamErrorSummary(body []byte) string {
+	text := strings.TrimSpace(string(body))
+	var v map[string]any
+	if json.Unmarshal(body, &v) == nil {
+		pick := func(m map[string]any, keys ...string) string {
+			for _, k := range keys {
+				if str, ok := m[k].(string); ok && strings.TrimSpace(str) != "" {
+					return str
+				}
+			}
+			return ""
+		}
+		if msg := pick(v, "error", "message", "detail", "error_description"); msg != "" {
+			text = msg
+		} else if inner, ok := v["error"].(map[string]any); ok {
+			if msg := pick(inner, "message", "detail", "code", "type"); msg != "" {
+				text = msg
+			}
+		}
+	}
+	text = strings.Map(func(r rune) rune {
+		if r == utf8.RuneError || unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, text)
+	text = strings.Join(strings.Fields(text), " ")
+	if utf8.RuneCountInString(text) > h3UpstreamErrorMaxRunes {
+		runes := []rune(text)
+		text = string(runes[:h3UpstreamErrorMaxRunes]) + "..."
+	}
+	return text
 }
 
 // Accept only short, opaque trace tokens. A URL, free-form text, or a list of
@@ -546,6 +595,9 @@ func (s *H3Service) requestWithDiagnostics(ctx context.Context, a *Account, meth
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		if diag != nil {
 			diag.failure = "upstream_http"
+			if errBody, readErr := io.ReadAll(io.LimitReader(resp.Body, h3UpstreamErrorReadLimit)); readErr == nil || len(errBody) > 0 {
+				diag.upstreamError = h3UpstreamErrorSummary(errBody)
+			}
 		}
 		return nil, &h3UpstreamHTTPError{StatusCode: resp.StatusCode}
 	}
