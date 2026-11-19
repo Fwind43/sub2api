@@ -162,6 +162,10 @@ func (h *OpenAIGatewayHandler) MiniMaxH3Create(c *gin.Context) {
 		return
 	}
 	task, err := h.h3.Create(c.Request.Context(), key, sub, body, c.GetHeader("Idempotency-Key"))
+	if errors.Is(err, service.ErrH3ActiveLimit) {
+		h.errorResponse(c, 429, "video_task_limit_reached", err.Error())
+		return
+	}
 	if errors.Is(err, service.ErrH3Conflict) {
 		h.errorResponse(c, 409, "idempotency_conflict", err.Error())
 		return

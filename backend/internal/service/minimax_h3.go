@@ -37,6 +37,7 @@ const h3SubmissionLeaseSeconds = int((h3SubmissionTimeout + time.Minute) / time.
 const h3SubmitPath = "/videos/generations"
 
 var ErrH3NotFound = errors.New("H3 task not found")
+var ErrH3ActiveLimit = errors.New("active H3 task limit reached; wait for a task to finish")
 var ErrH3Conflict = errors.New("idempotency key belongs to a different request")
 
 // H3CreateError identifies the failed lifecycle stage without exposing request
@@ -299,7 +300,22 @@ func (s *H3Service) Create(ctx context.Context, key *APIKey, sub *UserSubscripti
 	}
 	id := "h3-" + uuid.NewString()
 	stage = "task_insert"
-	res, err := s.db.ExecContext(ctx, `INSERT INTO minimax_h3_tasks(id,user_id,api_key_id,group_id,account_id,snapshot,idempotency_key,payload_hash,lease_until) VALUES($1,$2,$3,$4,$5,$6,$7,$8,now()+$9*interval '1 second') ON CONFLICT(api_key_id,idempotency_key) DO NOTHING`, id, key.UserID, key.ID, *key.GroupID, account.ID, string(raw), idem, hash, h3SubmissionLeaseSeconds)
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	limit := 2
+	if s.gateway.cfg != nil {
+		limit = s.gateway.cfg.Gateway.H3MaxActiveTasksPerUser
+	}
+	if limit > 0 {
+		// Serialize admission across replicas, but never hold the lock during submission.
+		if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('h3:user:' || $1::bigint::text,0))`, key.UserID); err != nil {
+			return nil, err
+		}
+	}
+	res, err := tx.ExecContext(ctx, `INSERT INTO minimax_h3_tasks(id,user_id,api_key_id,group_id,account_id,snapshot,idempotency_key,payload_hash,lease_until) VALUES($1,$2,$3,$4,$5,$6,$7,$8,now()+$9*interval '1 second') ON CONFLICT(api_key_id,idempotency_key) DO NOTHING`, id, key.UserID, key.ID, *key.GroupID, account.ID, string(raw), idem, hash, h3SubmissionLeaseSeconds)
 	if err != nil {
 		return nil, err
 	}
@@ -310,11 +326,25 @@ func (s *H3Service) Create(ctx context.Context, key *APIKey, sub *UserSubscripti
 	}
 	if n == 0 {
 		stage = "idempotency_reload"
-		old, err = scanH3(s.db.QueryRowContext(ctx, "SELECT "+h3Columns+" FROM minimax_h3_tasks WHERE api_key_id=$1 AND idempotency_key=$2", key.ID, idem))
+		old, err = scanH3(tx.QueryRowContext(ctx, "SELECT "+h3Columns+" FROM minimax_h3_tasks WHERE api_key_id=$1 AND idempotency_key=$2", key.ID, idem))
 		if err == nil && (old.hash != hash || old.GroupID != *key.GroupID || old.UserID != key.UserID) {
 			return nil, ErrH3Conflict
 		}
 		return old, err
+	}
+	if limit > 0 {
+		var active int
+		// Includes this transaction's new task; rolling back rejects it before submission.
+		err = tx.QueryRowContext(ctx, `SELECT count(*) FROM minimax_h3_tasks WHERE user_id=$1 AND generation IN ('submitting','pending')`, key.UserID).Scan(&active)
+		if err != nil {
+			return nil, err
+		}
+		if active > limit {
+			return nil, fmt.Errorf("%w (limit: %d)", ErrH3ActiveLimit, limit)
+		}
+	}
+	if err = tx.Commit(); err != nil {
+		return nil, err
 	}
 	// Transfer the account slot to the worker only after durable insertion.
 	// The HTTP request returns without waiting for GPU startup/rendering.

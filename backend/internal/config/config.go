@@ -1049,6 +1049,7 @@ const (
 
 // GatewayConfig API网关相关配置
 type GatewayConfig struct {
+	H3MaxActiveTasksPerUser int `mapstructure:"h3_max_active_tasks_per_user"`
 	// MinOutputTokens is the minimum max_output_tokens used when
 	// converting Chat Completions or Anthropic requests to Responses.
 	MinOutputTokens int `mapstructure:"min_output_tokens"`
@@ -2623,6 +2624,7 @@ func setDefaults() {
 	viper.SetDefault("gateway.image_concurrency.max_waiting_requests", 100)
 	viper.SetDefault("gateway.antigravity_fallback_cooldown_minutes", 1)
 	viper.SetDefault("gateway.antigravity_extra_retries", 10)
+	viper.SetDefault("gateway.h3_max_active_tasks_per_user", 2)
 	viper.SetDefault("gateway.max_body_size", int64(256*1024*1024))
 	// Without explicit config or env, load() replaces this with a size derived
 	// from the memory limit (see autoRequestBodyMemoryBudget).
@@ -3452,6 +3454,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Idempotency.CleanupBatchSize <= 0 {
 		return fmt.Errorf("idempotency.cleanup_batch_size must be positive")
+	}
+	if c.Gateway.H3MaxActiveTasksPerUser < 0 {
+		return fmt.Errorf("gateway.h3_max_active_tasks_per_user must be non-negative")
 	}
 	if c.Gateway.MaxBodySize <= 0 {
 		return fmt.Errorf("gateway.max_body_size must be positive")
