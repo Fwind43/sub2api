@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -29,6 +30,38 @@ type H3NodeStatus struct {
 	Pending int           `json:"pending"`
 	Queued  int           `json:"queued"`
 	Health  *H3NodeHealth `json:"health"`
+}
+
+type h3UserStatusCache struct {
+	mu      sync.Mutex
+	expires time.Time
+	nodes   []H3NodeStatus
+}
+
+func (s *H3Service) UserNodeStatus(ctx context.Context) ([]H3NodeStatus, error) {
+	cache := &s.userStatus
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	if time.Now().Before(cache.expires) {
+		return cache.nodes, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	nodes, err := s.NodeStatus(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range nodes {
+		nodes[i].ID = int64(i + 1)
+		nodes[i].Name = ""
+		if nodes[i].Health != nil {
+			nodes[i].Health.GPU = ""
+		}
+	}
+	cache.nodes = nodes
+	cache.expires = time.Now().Add(30 * time.Second)
+	return nodes, nil
 }
 
 func (s *H3Service) NodeStatus(ctx context.Context) ([]H3NodeStatus, error) {

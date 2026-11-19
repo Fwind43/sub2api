@@ -241,6 +241,12 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/h3-status', name: 'UserH3Status',
+    component: () => import('@/views/admin/H3StatusView.vue'),
+    props: { userView: true },
+    meta: { requiresAuth: true, requiresAdmin: false, title: 'MiniMax H3 状态' }
+  },
+  {
     path: '/video-tasks',
     name: 'VideoTasks',
     component: () => import('@/views/user/VideoTasksView.vue'),

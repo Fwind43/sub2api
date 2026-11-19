@@ -80,14 +80,15 @@ type H3Task struct {
 	hash       string
 }
 type H3Service struct {
-	db      *sql.DB
-	gateway *OpenAIGatewayService
-	keys    *APIKeyService
-	ctx     context.Context
-	cancel  context.CancelFunc
-	wg      sync.WaitGroup
-	mu      sync.Mutex // Serializes worker registration with Stop.
-	stopped bool
+	userStatus h3UserStatusCache
+	db         *sql.DB
+	gateway    *OpenAIGatewayService
+	keys       *APIKeyService
+	ctx        context.Context
+	cancel     context.CancelFunc
+	wg         sync.WaitGroup
+	mu         sync.Mutex // Serializes worker registration with Stop.
+	stopped    bool
 }
 
 func NewH3Service(db *sql.DB, gateway *OpenAIGatewayService, keys *APIKeyService) *H3Service {

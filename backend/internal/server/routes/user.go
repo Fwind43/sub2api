@@ -30,6 +30,7 @@ func RegisterUserRoutes(
 		{
 			user.GET("/profile", h.User.GetProfile)
 			if h.OpenAIGateway != nil {
+				user.GET("/h3-status", h.OpenAIGateway.MiniMaxH3UserNodes)
 				user.GET("/video-tasks", h.OpenAIGateway.MiniMaxH3History)
 				user.GET("/video-tasks/:id/content", h.OpenAIGateway.MiniMaxH3UserContent)
 				user.POST("/video-tasks/:id/refresh", h.OpenAIGateway.MiniMaxH3UserRefresh)
