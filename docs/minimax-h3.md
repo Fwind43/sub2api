@@ -1,5 +1,7 @@
 # MiniMax H3: GeToken native reference requests
 
+> 中文调用 SOP（完整流程、幂等、轮询、下载、计费、自部署上游）：[minimax-h3-sop.zh.md](minimax-h3-sop.zh.md)
+
 This gateway uses GeToken's `task` + `conditions` contract, **not** the hosted
 MiniMax `content[]` / `voice_id` contract. Protocol reference:
 <https://www.getoken.tech/dashboard/tokens> (H3 examples).
