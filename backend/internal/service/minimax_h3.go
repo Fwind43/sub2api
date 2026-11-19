@@ -347,6 +347,25 @@ func (s *H3Service) Create(ctx context.Context, key *APIKey, sub *UserSubscripti
 			return nil, fmt.Errorf("%w (limit: %d)", ErrH3ActiveLimit, limit)
 		}
 	}
+	// Lock the account through commit so different users cannot claim its last slot together.
+	var accountLimit int
+	err = tx.QueryRowContext(ctx, `SELECT COALESCE((credentials->>'h3_max_active_tasks')::bigint,0) FROM accounts WHERE id=$1 FOR NO KEY UPDATE`, account.ID).Scan(&accountLimit)
+	if err != nil {
+		return nil, err
+	}
+	if accountLimit < 0 {
+		return nil, errors.New("invalid H3 account task limit")
+	}
+	if accountLimit > 0 {
+		var active int
+		err = tx.QueryRowContext(ctx, `SELECT count(*) FROM minimax_h3_tasks WHERE account_id=$1 AND generation IN ('submitting','pending')`, account.ID).Scan(&active)
+		if err != nil {
+			return nil, err
+		}
+		if active > accountLimit {
+			return nil, fmt.Errorf("%w (upstream account limit: %d)", ErrH3ActiveLimit, accountLimit)
+		}
+	}
 	if err = tx.Commit(); err != nil {
 		return nil, err
 	}

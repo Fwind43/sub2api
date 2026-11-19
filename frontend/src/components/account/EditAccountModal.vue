@@ -156,6 +156,10 @@
         </div>
         <div v-if="account.platform === 'minimax' && account.type === 'apikey'">
           <button type="button" class="btn btn-secondary" :aria-pressed="isMiniMaxH3" @click="editAccountMode = 'h3'">MiniMax H3 (Video / Image)</button>
+          <label v-if="isMiniMaxH3" class="mt-3 block">
+            {{ t('admin.settings.defaults.h3AccountLimit') }}
+            <input v-model.number="h3TaskLimit" class="input" type="number" min="0" step="1" required />
+          </label>
           <p v-if="isMiniMaxH3" class="input-hint">MiniMax-H3 / MiniMax-H3-Image. Custom base URL required. No OAuth or text endpoints.</p>
         </div>
         <!-- Account Mode Selection (CN providers) -->
@@ -3725,6 +3729,7 @@ const editApiProtocol = ref<CnApiProtocol>('adaptive')
 const editOpenCodeGoProtocolRules = ref<OpenCodeGoProtocolRule[]>(cloneOpenCodeGoProtocolRules())
 // 多协议供应商（国产厂商与走通用表单的供应商）的接入模式；OpenCode 用 editOpenCodeAccountMode。
 const editAccountMode = ref<string>('payg')
+const h3TaskLimit = ref(0)
 const isMiniMaxH3 = computed(() => props.account?.platform === 'minimax' && editAccountMode.value === 'h3')
 const editOpenCodeAccountMode = ref<OpenCodeAccountMode>('go')
 // 国产厂商的接入模式只有 payg / coding。
@@ -4648,6 +4653,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   form.notes = newAccount.notes || ''
   form.proxy_id = newAccount.proxy_id
   form.concurrency = newAccount.concurrency
+  h3TaskLimit.value = Number(newAccount.credentials?.h3_max_active_tasks ?? 0)
   form.load_factor = newAccount.load_factor ?? null
   form.priority = newAccount.priority
   form.rate_multiplier = newAccount.rate_multiplier ?? 1
@@ -5743,6 +5749,7 @@ const handleSubmit = async () => {
           return
         }
         newCredentials.account_mode = 'h3'
+        newCredentials.h3_max_active_tasks = Number(h3TaskLimit.value)
         delete newCredentials.api_protocol
         delete newCredentials.api_base_urls
       } else if (isCNApiKeyAccount.value) {

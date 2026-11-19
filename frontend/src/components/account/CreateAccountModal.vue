@@ -636,7 +636,11 @@
 
       <div v-if="form.platform === 'minimax'" class="mt-4">
         <button type="button" class="btn btn-secondary" :aria-pressed="isMiniMaxH3" @click="accountMode = 'h3'">MiniMax H3 (Video / Image)</button>
-        <p v-if="isMiniMaxH3" class="input-hint">MiniMax-H3 / MiniMax-H3-Image. API key and custom base URL required. No OAuth or text endpoints.</p>
+        <label v-if="isMiniMaxH3" class="mt-3 block">
+            {{ t('admin.settings.defaults.h3AccountLimit') }}
+            <input v-model.number="h3TaskLimit" class="input" type="number" min="0" step="1" required />
+          </label>
+          <p v-if="isMiniMaxH3" class="input-hint">MiniMax-H3 / MiniMax-H3-Image. API key and custom base URL required. No OAuth or text endpoints.</p>
       </div>
       <!-- Account Mode Selection (Kimi / Zhipu / DeepSeek) -->
       <div v-if="isCNPlatform && !isOpenCodeGoPlatform">
@@ -4355,6 +4359,7 @@ const upstreamBillingAutoProbeEnabled = ref(true)
 // ── 国产供应商（Kimi / Zhipu / DeepSeek）账号类型、API 协议与端点 ──
 // 多协议供应商（国产厂商与走通用表单的供应商）的接入模式；OpenCode 用 openCodeAccountMode。
 const accountMode = ref<string>('payg')
+const h3TaskLimit = ref(0)
 const isMiniMaxH3 = computed(() => form.platform === 'minimax' && accountMode.value === 'h3')
 const openCodeAccountMode = ref<OpenCodeAccountMode>('zen')
 // API 协议决定转发端点与格式：cc=现有转换链，anthropic=原生直通（Claude Code），
@@ -5609,6 +5614,7 @@ const resetForm = () => {
   form.credentials = {}
   form.proxy_id = null
   form.concurrency = 10
+  h3TaskLimit.value = 0
   form.load_factor = null
   form.priority = 1
   form.rate_multiplier = 1
@@ -6137,6 +6143,7 @@ const handleSubmit = async () => {
       return
     }
     credentials.account_mode = 'h3'
+        credentials.h3_max_active_tasks = Number(h3TaskLimit.value)
   } else if (isMultiProtocolApiKeyPlatform(form.platform)) {
     credentials.account_mode = form.platform === 'opencode_go' ? openCodeAccountMode.value : accountMode.value
     credentials.api_protocol = apiProtocol.value
