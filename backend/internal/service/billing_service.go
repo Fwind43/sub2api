@@ -545,15 +545,15 @@ func (s *BillingService) initFallbackPricing() {
 
 	// Gemini 4 Argon (Google AI pricing: $2 input / $10 output / $0.10 cached
 	// input per MTok, promotional through 2026-11-30; official rates double to
-	// $4/$20/$0.20 from 2026-12-01). One rate covers every prompt length.
-	// Antigravity's -high/-low/-medium aliases are matched below so unavailable
+	// $4/$20/$0.20 from 2026-12-01; Priority is 1.8x). One rate covers every
+	// prompt length. Thinking-tier aliases are matched below so unavailable
 	// remote pricing never records token-bearing requests at $0.
-	s.fallbackPrices["gemini-4-argon"] = &ModelPricing{
+	s.fallbackPrices["gemini-4-argon"] = pricingWithPriorityMultiplier(&ModelPricing{
 		InputPricePerToken:     2e-6,
 		OutputPricePerToken:    10e-6,
 		CacheReadPricePerToken: 0.1e-6,
 		SupportsCacheBreakdown: false,
-	}
+	}, 1.8)
 
 	// Gemini 4 Carbon: introductory Google AI rates through 2026-11-30.
 	// From 2026-12-01 the published $2/$10/$0.10 per MTok rates double
@@ -569,13 +569,14 @@ func (s *BillingService) initFallbackPricing() {
 	}
 
 	// Gemini 4 Argon Cyber Permissive (Vertex AI pricing: $4 input / $20 output /
-	// $0.20 cached input per MTok). The Gemini 4 Argon promotion does not apply.
-	s.fallbackPrices["gemini-4-argon-cyber-permissive"] = &ModelPricing{
+	// $0.20 cached input per MTok; Priority is 1.8x). The Gemini 4 Argon
+	// promotion does not apply.
+	s.fallbackPrices["gemini-4-argon-cyber-permissive"] = pricingWithPriorityMultiplier(&ModelPricing{
 		InputPricePerToken:     4e-6,
 		OutputPricePerToken:    20e-6,
 		CacheReadPricePerToken: 0.2e-6,
 		SupportsCacheBreakdown: false,
-	}
+	}, 1.8)
 
 	// Gemini 4 Hydrogen (Google AI pricing: $1.50 input / $7.50 output /
 	// $0.075 cached input per MTok; Priority is 1.8x). One rate covers every
@@ -584,6 +585,15 @@ func (s *BillingService) initFallbackPricing() {
 		InputPricePerToken:     1.5e-6,
 		OutputPricePerToken:    7.5e-6,
 		CacheReadPricePerToken: 0.075e-6,
+		SupportsCacheBreakdown: false,
+	}, 1.8)
+
+	// Gemini 4 Neon (Google AI pricing: $3 input / $15 output / $0.15 cached
+	// input per MTok; Priority is 1.8x). One rate covers every prompt length.
+	s.fallbackPrices["gemini-4-neon"] = pricingWithPriorityMultiplier(&ModelPricing{
+		InputPricePerToken:     3e-6,
+		OutputPricePerToken:    15e-6,
+		CacheReadPricePerToken: 0.15e-6,
 		SupportsCacheBreakdown: false,
 	}, 1.8)
 
@@ -1251,17 +1261,21 @@ func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
 	if strings.Contains(modelLower, "gemini-3.8-flash") || strings.Contains(modelLower, "gemini-3-8-flash") {
 		return s.fallbackPrices["gemini-3.8-flash"]
 	}
-	if normalizeGeminiThinkingTierAlias(lastSegment(strings.TrimSpace(modelLower))) == "gemini-4-carbon" {
+	normalizedGemini := normalizeGeminiThinkingTierAlias(lastSegment(strings.TrimSpace(modelLower)))
+	if normalizedGemini == "gemini-4-carbon" {
 		return s.fallbackPrices["gemini-4-carbon"]
+	}
+	if normalizedGemini == "gemini-4-neon" || (strings.Contains(modelLower, "gemini-4-neon") && !strings.Contains(modelLower, "cyber")) {
+		return s.fallbackPrices["gemini-4-neon"]
 	}
 	// Cyber 变体不享受 Gemini 4 Argon 的优惠价，必须先于 "gemini-4-argon" 判。
 	if strings.Contains(modelLower, "gemini-4-argon-cyber") {
 		return s.fallbackPrices["gemini-4-argon-cyber-permissive"]
 	}
-	if strings.Contains(modelLower, "gemini-4-argon") {
+	if normalizedGemini == "gemini-4-argon" || strings.Contains(modelLower, "gemini-4-argon") {
 		return s.fallbackPrices["gemini-4-argon"]
 	}
-	if strings.Contains(modelLower, "gemini-4-hydrogen") {
+	if normalizedGemini == "gemini-4-hydrogen" || strings.Contains(modelLower, "gemini-4-hydrogen") {
 		return s.fallbackPrices["gemini-4-hydrogen"]
 	}
 
