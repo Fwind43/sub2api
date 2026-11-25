@@ -1,10 +1,21 @@
 package service
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
+	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func TestGeminiResponseToChatCompletionsPreservesInlineData(t *testing.T) {
@@ -222,4 +233,230 @@ func TestConvertGeminiToClaudeMessageOmitsThoughtParts(t *testing.T) {
 	require.Equal(t, "tool_use", toolUse["type"])
 	require.Equal(t, "get_weather", toolUse["name"])
 	require.Equal(t, "tool_use", got["stop_reason"])
+}
+
+type failingChatStreamWriter struct {
+	header      http.Header
+	statusCode  int
+	failOnWrite bool
+	mu          sync.Mutex
+	buf         bytes.Buffer
+	flushCount  int
+}
+
+func (w *failingChatStreamWriter) Header() http.Header {
+	if w.header == nil {
+		w.header = make(http.Header)
+	}
+	return w.header
+}
+
+func (w *failingChatStreamWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.failOnWrite {
+		return 0, errors.New("client write failed")
+	}
+	return w.buf.Write(p)
+}
+
+func (w *failingChatStreamWriter) WriteHeader(statusCode int) {
+	w.statusCode = statusCode
+}
+
+func (w *failingChatStreamWriter) Flush() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.flushCount++
+}
+
+func (w *failingChatStreamWriter) setFailOnWrite(v bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.failOnWrite = v
+}
+
+func (w *failingChatStreamWriter) bodyString() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buf.String()
+}
+
+func newTestGinContext(w http.ResponseWriter) *gin.Context {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	return c
+}
+
+func TestHandleChatCompletionsStreamingResponseFromGemini_EmitsKeepaliveDuringSilence(t *testing.T) {
+	prev := geminiChatCompletionsKeepaliveIntervalOverride
+	geminiChatCompletionsKeepaliveIntervalOverride = 25 * time.Millisecond
+	t.Cleanup(func() { geminiChatCompletionsKeepaliveIntervalOverride = prev })
+
+	pr, pw := io.Pipe()
+	go func() {
+		defer func() { _ = pw.Close() }()
+		time.Sleep(80 * time.Millisecond)
+		_, _ = io.WriteString(pw, `data: {"candidates":[{"content":{"parts":[{"text":"hello"}]}}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":3}}`+"\n\n")
+		time.Sleep(80 * time.Millisecond)
+		_, _ = io.WriteString(pw, `data: {"candidates":[{"content":{"parts":[{"text":" world"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5}}`+"\n\n")
+	}()
+
+	rec := httptest.NewRecorder()
+	c := newTestGinContext(rec)
+	svc := &GeminiMessagesCompatService{
+		cfg: &config.Config{Gateway: config.GatewayConfig{StreamKeepaliveInterval: 10}},
+	}
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       pr,
+	}
+
+	res, err := svc.handleChatCompletionsStreamingResponseFromGemini(c, resp, time.Now(), "gemini-4-neon-xhigh", false, true)
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	require.False(t, res.clientDisconnect)
+	require.True(t, res.finished)
+	require.Equal(t, 10, res.usage.InputTokens)
+	require.Equal(t, 5, res.usage.OutputTokens)
+
+	body := rec.Body.String()
+	require.GreaterOrEqual(t, strings.Count(body, ":\n\n"), 2, "expected keepalive comments during silent intervals, got:\n%s", body)
+	require.Contains(t, body, `"content":"hello"`)
+	require.Contains(t, body, `"content":" world"`)
+	require.Contains(t, body, "data: [DONE]\n\n")
+}
+
+func TestHandleChatCompletionsStreamingResponseFromGemini_NoKeepaliveWhenDisabled(t *testing.T) {
+	prev := geminiChatCompletionsKeepaliveIntervalOverride
+	geminiChatCompletionsKeepaliveIntervalOverride = 0
+	t.Cleanup(func() { geminiChatCompletionsKeepaliveIntervalOverride = prev })
+
+	pr, pw := io.Pipe()
+	go func() {
+		defer func() { _ = pw.Close() }()
+		time.Sleep(40 * time.Millisecond)
+		_, _ = io.WriteString(pw, `data: {"candidates":[{"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":1}}`+"\n\n")
+	}()
+
+	rec := httptest.NewRecorder()
+	c := newTestGinContext(rec)
+	svc := &GeminiMessagesCompatService{
+		cfg: &config.Config{Gateway: config.GatewayConfig{StreamKeepaliveInterval: 0}},
+	}
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       pr,
+	}
+
+	res, err := svc.handleChatCompletionsStreamingResponseFromGemini(c, resp, time.Now(), "gemini-4-neon-xhigh", false, false)
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	require.True(t, res.finished)
+	require.NotContains(t, rec.Body.String(), ":\n\n")
+	require.Contains(t, rec.Body.String(), `"content":"ok"`)
+}
+
+func TestHandleChatCompletionsStreamingResponseFromGemini_KeepaliveDisconnectStopsCleanly(t *testing.T) {
+	prev := geminiChatCompletionsKeepaliveIntervalOverride
+	geminiChatCompletionsKeepaliveIntervalOverride = 20 * time.Millisecond
+	t.Cleanup(func() { geminiChatCompletionsKeepaliveIntervalOverride = prev })
+
+	pr, pw := io.Pipe()
+	defer func() { _ = pw.Close() }()
+
+	writer := &failingChatStreamWriter{}
+	writer.setFailOnWrite(true)
+	c := newTestGinContext(writer)
+	svc := &GeminiMessagesCompatService{
+		cfg: &config.Config{Gateway: config.GatewayConfig{StreamKeepaliveInterval: 10}},
+	}
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       pr,
+	}
+
+	done := make(chan struct{})
+	var (
+		res *geminiStreamResult
+		err error
+	)
+	go func() {
+		defer close(done)
+		res, err = svc.handleChatCompletionsStreamingResponseFromGemini(c, resp, time.Now(), "gemini-4-neon-xhigh", false, false)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("streaming handler did not exit promptly after keepalive write error")
+	}
+
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	require.True(t, res.clientDisconnect)
+}
+
+func TestHandleChatCompletionsStreamingResponseFromGemini_ThinkingDeltaPassthrough(t *testing.T) {
+	prev := geminiChatCompletionsKeepaliveIntervalOverride
+	geminiChatCompletionsKeepaliveIntervalOverride = 0
+	t.Cleanup(func() { geminiChatCompletionsKeepaliveIntervalOverride = prev })
+
+	// Verify request-side thinkingConfig enables includeThoughts without overriding -xhigh model tier.
+	baseReq := `{"contents":[{"role":"user","parts":[{"text":"solve"}]}],"generationConfig":{"maxOutputTokens":4096}}`
+	outReq := applyGeminiCompatThinkingConfig([]byte(baseReq), []byte(`{"model":"gemini-4-neon-xhigh"}`), "gemini-4-neon-xhigh", true)
+	require.True(t, gjson.GetBytes(outReq, "generationConfig.thinkingConfig.includeThoughts").Bool())
+	require.False(t, gjson.GetBytes(outReq, "generationConfig.thinkingConfig.thinkingLevel").Exists())
+
+	sse := strings.Join([]string{
+		`data: {"candidates":[{"content":{"parts":[{"text":"step 1 ","thought":true}]}}]}`,
+		``,
+		`data: {"candidates":[{"content":{"parts":[{"text":"step 2","thought":true}]}}]}`,
+		``,
+		`data: {"candidates":[{"content":{"parts":[{"text":"final answer"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":12,"candidatesTokenCount":20,"thoughtsTokenCount":15}}`,
+		``,
+	}, "\n") + "\n"
+
+	rec := httptest.NewRecorder()
+	c := newTestGinContext(rec)
+	svc := &GeminiMessagesCompatService{
+		cfg: &config.Config{Gateway: config.GatewayConfig{StreamKeepaliveInterval: 0}},
+	}
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader(sse)),
+	}
+
+	res, err := svc.handleChatCompletionsStreamingResponseFromGemini(c, resp, time.Now(), "gemini-4-neon-xhigh", false, true)
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	require.True(t, res.finished)
+	require.Equal(t, 12, res.usage.InputTokens)
+	require.Equal(t, 35, res.usage.OutputTokens)
+
+	var reasoningBuf strings.Builder
+	var contentBuf strings.Builder
+	for _, line := range strings.Split(rec.Body.String(), "\n") {
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		payload := strings.TrimPrefix(line, "data: ")
+		if payload == "[DONE]" {
+			continue
+		}
+		if r := gjson.Get(payload, "choices.0.delta.reasoning_content"); r.Exists() {
+			reasoningBuf.WriteString(r.String())
+		}
+		if txt := gjson.Get(payload, "choices.0.delta.content"); txt.Exists() {
+			contentBuf.WriteString(txt.String())
+		}
+	}
+	require.Equal(t, "step 1 step 2", reasoningBuf.String())
+	require.Equal(t, "final answer", contentBuf.String())
+	require.Contains(t, rec.Body.String(), "data: [DONE]\n\n")
 }
