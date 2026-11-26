@@ -33,7 +33,7 @@ func TestMiniMaxH3CreateBodyBoundaries(t *testing.T) {
 		message    string
 	}{
 		{"above_old_2MiB", largeValid, 0, false, http.StatusBadRequest, "MiniMax target group required"},
-		{"over_12MiB", strings.Repeat(" ", service.H3MaxRequestBytes+1), 0, false, http.StatusRequestEntityTooLarge, "request body limit"},
+		{"over_64MiB", strings.Repeat(" ", service.H3MaxRequestBytes+1), 0, false, http.StatusRequestEntityTooLarge, "request body limit"},
 		{"smaller_operator_cap", largeValid, 1024, false, http.StatusRequestEntityTooLarge, "1024 bytes"},
 		{"malformed_json", "{", 0, false, http.StatusBadRequest, "non-empty JSON"},
 		{"read_failure", "", 0, true, http.StatusBadRequest, "Unable to read H3 JSON"},

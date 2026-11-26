@@ -73,7 +73,7 @@ Authorization: Bearer <你的Sub2API_API_Key>
 | `seconds` | 兼容时长字段；建议不传。与 `duration` 同时出现时必须相同。 |
 | `n` | 建议不传；如需传，只使用 `1`。一个任务只生成一条视频。 |
 
-不要依赖默认值：省略时长会默认 6 秒，省略分辨率会默认 720p，这不是本 SOP 已成功验收的组合。本接口 JSON 上限为 **12 MiB**；所有输入素材解码后合计最多 **8 MiB**。外层代理或运营配置若更小，仍可能先拦截。
+不要依赖默认值：省略时长会默认 6 秒，省略分辨率会默认 720p，这不是本 SOP 已成功验收的组合。本接口 JSON 上限为 **64 MiB**；所有输入素材解码后合计最多 **47 MiB**。外层代理或运营配置若更小，仍可能先拦截。
 
 ### 3.3 模式选择：文生、i2v、首尾帧、全能参考、音色参考
 
@@ -111,7 +111,7 @@ Authorization: Bearer <你的Sub2API_API_Key>
 - `data` 必须是文件的 **Base64 data URI**，不是裸 Base64、HTTP URL、本地路径或 multipart 文件。
 - MIME：图片 `image/png`、`image/jpeg`；视频 `video/mp4`；音频 `audio/wav`、`audio/x-wav`、`audio/mpeg`、`audio/mp3`。MIME 必须与 `type` 对应，不能只改扩展名冒充格式。
 - 最多 **9 张参考图、3 段视频、3 段音频**；`video_audio` 同时占视频和音频配额；包含首尾帧在内，总计最多 **12 个文件**。
-- 全部原始媒体合计最多 **8 MiB = 8,388,608 字节**；完整 JSON 最多 **12 MiB = 12,582,912 字节**。Base64 会膨胀体积，不要把 8 MiB 当作每个文件限制。
+- 全部原始媒体合计最多 **47 MiB = 49,283,072 字节**；完整 JSON 最多 **64 MiB = 67,108,864 字节**。Base64 会膨胀体积，不要把 47 MiB 当作每个文件限制。
 - 供应商文档要求音频/视频单段 **2–15 秒**，同一媒体类别合计最多 **15 秒**；实际解码、时长、是否有音轨由上游检查，网关并未做本地媒体验真。带声音视频应保守地同时计入音频和视频时长预算。
 - 素材顺序与扩展字段会保留。提示词按供应商方式引用 `<Picture 1>`、`<Video 1>`、`<Audio 1>`，保持同类素材顺序稳定，不在提交后重新排序。编号的实际解释及参考效果由上游决定。
 - 只能上传有权处理的图片、视频和声音，特别是肖像与音色。供应商文档说明输入媒体、提示词、参数和输出可能保存在其私有归档；不要上传未获准外传的敏感内容。
@@ -176,10 +176,10 @@ for filename, kind, role, frame in specs:
     if mime not in allowed[kind]:
         raise ValueError(f"Unsupported media type: {path}")
     with path.open("rb") as f:
-        raw = f.read(8 * 1024 * 1024 - total + 1)
+        raw = f.read(47 * 1024 * 1024 - total + 1)
     total += len(raw)
-    if not raw or total > 8 * 1024 * 1024:
-        raise ValueError("Empty file or total decoded media exceeds 8 MiB")
+    if not raw or total > 47 * 1024 * 1024:
+        raise ValueError("Empty file or total decoded media exceeds 47 MiB")
     condition = {
         "type": kind, "role": role,
         "data": "data:" + mime + ";base64," + base64.b64encode(raw).decode("ascii"),
@@ -196,8 +196,8 @@ payload = {
 if conditions:
     payload["conditions"] = conditions
 body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-if len(body) > 12 * 1024 * 1024:
-    raise ValueError("JSON exceeds 12 MiB")
+if len(body) > 64 * 1024 * 1024:
+    raise ValueError("JSON exceeds 64 MiB")
 # x 模式防止覆盖原始请求；已有请求不要删除后重新生成来重试。
 with Path("request.json").open("xb") as f:
     f.write(body)
@@ -425,7 +425,7 @@ if ($Status.status -eq 'completed' -and $Status.delivery_status -eq 'verified' -
 | `409 idempotency_conflict`（创建） | 相同幂等键对应的原始请求字节或身份/分组不同。恢复原文件和原身份；不要为了消除错误随手换键。 |
 | `404 H3 task not found`（查询/下载） | 检查网关域名、`h3-...` ID、同一 Key 及原绑定分组。不能据此断言原任务不存在或从未计费。 |
 | `409 video_not_ready`（下载） | 尚未 verified + settled，响应给出 `Retry-After: 20`；先继续查状态。 |
-| `413` 请求过大 | JSON 超过 12 MiB 或更小的代理/运营限额；全部媒体解码后超过 8 MiB 则由参数校验返回 400。确认原请求未受理后再准备较小素材的新业务请求，不自动换键重发。 |
+| `413` 请求过大 | JSON 超过 64 MiB 或更小的代理/运营限额；全部媒体解码后超过 47 MiB 则由参数校验返回 400。确认原请求未受理后再准备较小素材的新业务请求，不自动换键重发。 |
 | `429` | 按响应提示退避，检查并发/配额；不得改键高频重建。 |
 | `502 h3_error`（创建） | 保留响应与 `X-Request-Id`，按上面的原键原请求规则恢复；需要时交管理员查创建阶段。 |
 | `502 h3_delivery_error`（下载） | 已有结算状态不变；仅重试该任务的下载，持续失败则联系管理员处理。 |
@@ -463,7 +463,7 @@ if ($Status.status -eq 'completed' -and $Status.delivery_status -eq 'verified' -
 默认建议 model=MiniMax-H3、duration=5、resolution=768p，单条视频。
 根据需求选择 task=t2va/fl2va/ref2va；参考素材使用 conditions 和 base64 data URI。
 按顺序保留参考素材；keyframe 仅图像且 frame_index=0/-1，reference 不带 frame_index。
-全部媒体合计<=8MiB、JSON<=12MiB；核查数量、MIME、真实时长和素材使用授权。
+全部媒体合计<=47MiB、JSON<=64MiB；核查数量、MIME、真实时长和素材使用授权。
 发送前保存唯一幂等键与原始请求字节；只创建一次，保存 h3- 任务 ID。
 全流程使用同一 Key 和原绑定分组；每20秒查状态，completed+verified+settled 后下载 MP4。
 超时不换键重建；submission_unknown 停止自动重试并请求人工核查。

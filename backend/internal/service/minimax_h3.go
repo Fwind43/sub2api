@@ -117,7 +117,7 @@ func ParseH3Request(body []byte) (H3Snapshot, error) {
 
 func parseH3Request(body []byte) (H3Snapshot, string, error) {
 	if len(body) > H3MaxRequestBytes {
-		return H3Snapshot{}, "", errors.New("H3 JSON must be at most 12 MiB")
+		return H3Snapshot{}, "", fmt.Errorf("H3 JSON must be at most %d MiB", H3MaxRequestBytes>>20)
 	}
 	snapshot, err := parseH3Snapshot(body)
 	if err != nil {

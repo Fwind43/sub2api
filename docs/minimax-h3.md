@@ -54,7 +54,7 @@ Use only media and voices you have permission to process.
 
 - Up to 9 reference images, 3 videos, 3 audios; `video_audio` counts toward both
   video and audio limits. All inputs, including keyframes, total at most 12 files.
-- All decoded input files together: **8 MiB**. The JSON request cap is **12 MiB**
+- All decoded input files together: **47 MiB**. The JSON request cap is **64 MiB**
   to accommodate base64 overhead. Exceeding the HTTP cap returns 413; invalid
   conditions or decoded-media overflow return 400. A lower operator/proxy cap
   still applies; other gateway routes' limits are unchanged.
@@ -92,8 +92,8 @@ def media(filename):
             ".mp4": "video/mp4", ".wav": "audio/wav", ".mp3": "audio/mpeg"}[path.suffix.lower()]
     raw = path.read_bytes()
     input_bytes += len(raw)
-    if input_bytes > 8 * 1024 * 1024:
-        raise ValueError("All input media must total at most 8 MiB")
+    if input_bytes > 47 * 1024 * 1024:
+        raise ValueError("All input media must total at most 47 MiB")
     return "data:" + mime + ";base64," + base64.b64encode(raw).decode("ascii")
 
 payload = {

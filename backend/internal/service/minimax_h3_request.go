@@ -13,9 +13,11 @@ import (
 )
 
 const (
-	// 8 MiB of decoded media needs ~10.67 MiB as base64, plus JSON/prompt.
-	H3MaxRequestBytes = 12 << 20
-	H3MaxMediaBytes   = 8 << 20
+	// GeToken H3 does not impose these caps; they only bound gateway memory.
+	// 47 MiB of decoded media needs ~62.67 MiB as base64, leaving room for
+	// JSON/prompt under the 64 MiB request cap.
+	H3MaxRequestBytes = 64 << 20
+	H3MaxMediaBytes   = 47 << 20
 	h3MaxConditions   = 12
 )
 
@@ -166,7 +168,7 @@ func h3MediaSize(kind, data string, remaining int64) (int64, error) {
 	reader := base64.NewDecoder(base64.StdEncoding.Strict(), strings.NewReader(encoded))
 	n, err := io.Copy(io.Discard, io.LimitReader(reader, remaining+1))
 	if n > remaining {
-		return 0, errors.New("all decoded H3 input files together must be at most 8 MiB")
+		return 0, fmt.Errorf("all decoded H3 input files together must be at most %d MiB", H3MaxMediaBytes>>20)
 	}
 	if err != nil || n == 0 {
 		return 0, errors.New("data contains invalid or empty base64 media")

@@ -192,7 +192,7 @@ func TestH3ReferenceDataURI(t *testing.T) {
 }
 
 func TestH3ReferenceByteLimits(t *testing.T) {
-	// Exact 8 MiB decoded media is allowed even though JSON exceeds the old 2 MiB cap.
+	// Exact media-ceiling decoded media is allowed even though JSON exceeds the old 2 MiB cap.
 	encoded := base64.StdEncoding.EncodeToString(make([]byte, H3MaxMediaBytes))
 	large := h3TestReference("image", "image/png")
 	large["data"] = "data:image/png;base64," + encoded
@@ -205,7 +205,7 @@ func TestH3ReferenceByteLimits(t *testing.T) {
 	}
 	// Check cumulative bytes, not just a per-file limit (keyframes count too).
 	body = h3TestBody(t, "ref2va", []map[string]any{large, h3TestKeyframe(0)})
-	if _, err := ParseH3Request(body); err == nil || !strings.Contains(err.Error(), "8 MiB") {
+	if _, err := ParseH3Request(body); err == nil || !strings.Contains(err.Error(), "47 MiB") {
 		t.Fatalf("accepted cumulative media overflow: %v", err)
 	}
 	// Trailing JSON whitespace is valid; it also counts toward the transport cap.
@@ -215,7 +215,7 @@ func TestH3ReferenceByteLimits(t *testing.T) {
 		t.Fatalf("exact JSON ceiling: %v", err)
 	}
 	body = append(body, ' ')
-	if _, err := ParseH3Request(body); err == nil || !strings.Contains(err.Error(), "12 MiB") {
+	if _, err := ParseH3Request(body); err == nil || !strings.Contains(err.Error(), "64 MiB") {
 		t.Fatalf("accepted JSON overflow: %v", err)
 	}
 }
