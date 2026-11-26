@@ -305,7 +305,7 @@ func (s *OpenAIGatewayService) runAsyncGrokMediaVideoCreate(
 		}
 		upstreamReq.Header.Set("Content-Type", ct)
 	}
-	account.ApplyHeaderOverrides(upstreamReq.Header)
+	account.ApplyHeaderOverrides(upstreamReq.Context(), upstreamReq.Header)
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {
@@ -474,7 +474,7 @@ func (s *OpenAIGatewayService) fetchAsyncUpstreamVideoStatusBody(
 		if account.IsGrokOAuth() && isGrokCLIProxyTarget(statusURL) {
 			applyGrokCLIHeaders(req.Header)
 		}
-		account.ApplyHeaderOverrides(req.Header)
+		account.ApplyHeaderOverrides(req.Context(), req.Header)
 
 		resp, err := s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
 		if err != nil {

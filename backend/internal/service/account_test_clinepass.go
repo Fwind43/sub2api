@@ -77,7 +77,7 @@ func (s *AccountTestService) testClinePassAccountConnection(c *gin.Context, acco
 	// Relay identity headers, identical to the live gateway path.
 	applyClinePassHeaders(req.Header)
 	// Account-level header overrides keep the highest priority.
-	account.ApplyHeaderOverrides(req.Header)
+	account.ApplyHeaderOverrides(req.Context(), req.Header)
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {

@@ -225,7 +225,7 @@ func (s *AccountTestService) probeClinePassPipeline(ctx context.Context, account
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", "Bearer "+credential)
 	applyClinePassHeaders(req.Header)
-	account.ApplyHeaderOverrides(req.Header)
+	account.ApplyHeaderOverrides(req.Context(), req.Header)
 
 	proxyURL := ""
 	if account.ProxyID != nil && account.Proxy != nil {

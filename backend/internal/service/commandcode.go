@@ -24,7 +24,7 @@ func (s *OpenAIGatewayService) sendCommandCodeRequest(ctx context.Context, c *gi
 		UserAgent: "command-code-cli/1.54.1", Version: "1.54.1",
 		HTTPClient: commandCodeHTTPDoer(func(req *http.Request) (*http.Response, error) {
 			req = req.WithContext(WithHTTPUpstreamProfile(req.Context(), HTTPUpstreamProfileOpenAI))
-			account.ApplyHeaderOverrides(req.Header)
+			account.ApplyHeaderOverrides(req.Context(), req.Header)
 			return s.doOpenAIUpstream(req, proxyURL, account)
 		}),
 	}

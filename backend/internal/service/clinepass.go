@@ -223,7 +223,7 @@ func (s *OpenAIGatewayService) sendClinePassRequest(
 	if account.ProxyID != nil && account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
-	account.ApplyHeaderOverrides(upstreamReq.Header)
+	account.ApplyHeaderOverrides(upstreamReq.Context(), upstreamReq.Header)
 
 	resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account)
 	if err != nil {
