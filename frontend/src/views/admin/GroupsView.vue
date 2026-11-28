@@ -1153,7 +1153,7 @@
                     {{ family.label }}
                   </div>
                   <label
-                    v-for="resolution in grokVideoPriceResolutions"
+                    v-for="resolution in videoPriceResolutionsFor(family.key)"
                     :key="resolution.key"
                     class="block"
                   >
@@ -2825,7 +2825,7 @@
                     {{ family.label }}
                   </div>
                   <label
-                    v-for="resolution in grokVideoPriceResolutions"
+                    v-for="resolution in videoPriceResolutionsFor(family.key)"
                     :key="resolution.key"
                     class="block"
                   >
@@ -4441,9 +4441,9 @@ import {
 } from "./groupsImagePricing";
 import {
   createVideoModelPricesForm,
-  grokVideoPriceResolutions,
   serializeVideoModelPrices,
   videoModelPriceFamilyRows,
+  videoPriceResolutionsFor,
 } from "./groupsVideoModelPricing";
 
 const supportsLivePlatform = (platform: string): boolean =>

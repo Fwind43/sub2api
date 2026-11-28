@@ -237,7 +237,7 @@ func TestStartAsyncGrokVideoGeneration_CompletesInBackgroundAfterClientCancelAnd
 	require.NotNil(t, bgBilled)
 	require.Equal(t, 1, bgBilled.VideoCount)
 	require.Equal(t, 5, bgBilled.VideoDurationSeconds)
-	require.Equal(t, VideoBillingResolution480P, bgBilled.VideoResolution)
+	require.Equal(t, VideoBillingResolution768P, bgBilled.VideoResolution)
 
 	// Subsequent status poll returns done with rewritten content URL using synthetic ID.
 	doneCtx, doneRecorder := grokAsyncTestContext(

@@ -4,6 +4,7 @@ import "strings"
 
 const (
 	VideoBillingResolution480P  = "480p"
+	VideoBillingResolution768P  = "768p"
 	VideoBillingResolution720P  = "720p"
 	VideoBillingResolution1080P = "1080p"
 )
@@ -38,6 +39,8 @@ func LookupVideoBillingResolution(resolution string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(resolution)) {
 	case "480", "480p", "sd":
 		return VideoBillingResolution480P, true
+	case "768", "768p":
+		return VideoBillingResolution768P, true
 	case "720", "720p", "hd":
 		return VideoBillingResolution720P, true
 	case "1080", "1080p", "full_hd", "full-hd", "fhd":

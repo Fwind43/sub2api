@@ -9,6 +9,18 @@ export const grokVideoPriceFamilies = [
   { key: 'grok-imagine-video-1.5', label: 'grok-imagine-video-1.5' }
 ] as const
 
+export const h3VideoPriceFamily = { key: 'minimax-h3', label: 'MiniMax-H3' } as const
+export const h3VideoPriceResolutions = [
+  { key: '480p', label: '480p' },
+  { key: '768p', label: '768p' }
+] as const
+
+export function videoPriceResolutionsFor(family: string) {
+  return normalizeFamily(family) === h3VideoPriceFamily.key
+    ? h3VideoPriceResolutions
+    : grokVideoPriceResolutions
+}
+
 export type VideoModelPrices = Record<string, Record<string, number>>
 export type VideoModelPricesForm = Record<string, Record<string, number | string | null>>
 
@@ -22,8 +34,8 @@ function normalizePrice(value: unknown): number | null {
   return Number.isFinite(price) && price >= 0 ? price : null
 }
 
-function emptyTiers(): Record<string, number | string | null> {
-  return Object.fromEntries(grokVideoPriceResolutions.map(({ key }) => [key, null]))
+function emptyTiers(family = ''): Record<string, number | string | null> {
+  return Object.fromEntries(videoPriceResolutionsFor(family).map(({ key }) => [key, null]))
 }
 
 // Keep unknown families from an existing group so a future backend catalog is
@@ -36,7 +48,7 @@ export function createVideoModelPricesForm(
   for (const [rawFamily, rawTiers] of Object.entries(prices ?? {})) {
     const family = normalizeFamily(rawFamily)
     if (!family || !rawTiers || typeof rawTiers !== 'object') continue
-    form[family] = emptyTiers()
+    form[family] = emptyTiers(family)
     for (const [rawResolution, rawPrice] of Object.entries(rawTiers)) {
       const price = normalizePrice(rawPrice)
       if (price !== null) form[family][rawResolution.trim().toLowerCase()] = price
@@ -44,8 +56,9 @@ export function createVideoModelPricesForm(
   }
 
   for (const { key } of grokVideoPriceFamilies) {
-    form[key] ??= emptyTiers()
+    form[key] ??= emptyTiers(key)
   }
+  form[h3VideoPriceFamily.key] ??= emptyTiers(h3VideoPriceFamily.key)
   return form
 }
 
@@ -67,11 +80,14 @@ export function serializeVideoModelPrices(form: VideoModelPricesForm): VideoMode
 }
 
 export function videoModelPriceFamilyRows(form: VideoModelPricesForm) {
-  const known = new Set<string>(grokVideoPriceFamilies.map(({ key }) => key))
+  const known = new Set<string>([
+    ...grokVideoPriceFamilies.map(({ key }) => key),
+    h3VideoPriceFamily.key
+  ])
   const extra = Object.keys(form)
     .map(normalizeFamily)
     .filter((family) => family && !known.has(family))
     .sort()
     .map((key) => ({ key, label: key }))
-  return [...grokVideoPriceFamilies, ...extra]
+  return [...grokVideoPriceFamilies, h3VideoPriceFamily, ...extra]
 }
